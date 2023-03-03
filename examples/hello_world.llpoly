@@ -1,0 +1,4 @@
+define main function (argc: i32, argv: buf) -> i32 {
+    write_str(stdout, "Hello, world!\n")
+    return 0
+}
