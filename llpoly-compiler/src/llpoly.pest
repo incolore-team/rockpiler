@@ -1,9 +1,9 @@
 trans_unit = { SOI ~ definition* ~ EOI }
-    definition = { function }
+    definition = { function ~ TOK_NEWLINE* }
         function = { TOK_DEFINE ~ func_name ~ TOK_FUNCTION ~ TOK_LPAREN 
                         ~ func_params ~ TOK_RPAREN 
                         ~ ret_ty
-                        ~ (block | short_block) }
+                        ~ (short_block | block) }
             func_name = _{ ID }
             func_params = { typed_ids? }
             typed_ids = _{ typed_id ~ ("," ~ typed_id)* }
@@ -98,6 +98,7 @@ TOK_LPAREN = _{ "(" }
 TOK_RPAREN = _{ ")" }
 TOK_DEFINE = _{ "define" }
 TOK_FUNCTION = _{ "function" }
+TOK_NEWLINE = _ { "\r\n" | "\n" }
 
 NON_SPECIAL = _{ !(WHITE_SPACE | PUNCTUATION | SYMBOL) ~ ANY }
 

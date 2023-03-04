@@ -11,7 +11,7 @@ type ParseResult<T> = Result<T, Box<ParseError<Rule>>>;
 // Bug: https://github.com/eqrion/cbindgen/issues/286
 
 trait IntoParseResult<T> {
-    fn int(self, pair: Pair<Rule>) -> ParseResult<T>;
+    fn into_parse_result(self, pair: Pair<Rule>) -> ParseResult<T>;
 }
 
 impl<T, E> IntoParseResult<T> for Result<T, E>
@@ -36,27 +36,30 @@ lazy_static::lazy_static! {
         use pest::pratt_parser::{Assoc::*, Op};
         // Precedence is defined lowest to highest
         PrattParser::new()
-        .op(Op::infix(Rule::logic_or, Left))
-        .op(Op::infix(Rule::logic_and, Left))
-        .op(Op::prefix(Rule::not))
-        .op(Op::infix(Rule::cmp_lt, Left)
-            | Op::infix(Rule::cmp_gt, Left)
-            | Op::infix(Rule::cmp_le, Left)
-            | Op::infix(Rule::cmp_ge, Left)
-            | Op::infix(Rule::cmp_eq, Left)
-            | Op::infix(Rule::cmp_ne, Left))
-        .op(Op::infix(Rule::bitws_or, Left))
-        .op(Op::infix(Rule::bitws_xor, Left))
-        .op(Op::infix(Rule::bitws_and, Left))
-        .op(Op::infix(Rule::bitws_shl, Left) | Op::infix(Rule::bitws_shr, Left))
-        .op(Op::infix(Rule::arith_add, Left) | Op::infix(Rule::arith_sub, Left))
-        .op(Op::infix(Rule::arith_mul, Left)
-            | Op::infix(Rule::arith_div, Left)
-            | Op::infix(Rule::arith_mod, Left))
-        .op(Op::prefix(Rule::neg))
-        .op(Op::postfix(Rule::call_access))
-        .op(Op::postfix(Rule::array_access))
-        .op(Op::postfix(Rule::dot_access))
+        .op(Op::prefix(Rule::prefix))
+        .op(Op::infix(Rule::infix, Left))
+        .op(Op::postfix(Rule::postfix))
+        // .op(Op::infix(Rule::logic_or, Left))
+        // .op(Op::infix(Rule::logic_and, Left))
+        // .op(Op::prefix(Rule::not))
+        // .op(Op::infix(Rule::cmp_lt, Left)
+        //     | Op::infix(Rule::cmp_gt, Left)
+        //     | Op::infix(Rule::cmp_le, Left)
+        //     | Op::infix(Rule::cmp_ge, Left)
+        //     | Op::infix(Rule::cmp_eq, Left)
+        //     | Op::infix(Rule::cmp_ne, Left))
+        // .op(Op::infix(Rule::bitws_or, Left))
+        // .op(Op::infix(Rule::bitws_xor, Left))
+        // .op(Op::infix(Rule::bitws_and, Left))
+        // .op(Op::infix(Rule::bitws_shl, Left) | Op::infix(Rule::bitws_shr, Left))
+        // .op(Op::infix(Rule::arith_add, Left) | Op::infix(Rule::arith_sub, Left))
+        // .op(Op::infix(Rule::arith_mul, Left)
+        //     | Op::infix(Rule::arith_div, Left)
+        //     | Op::infix(Rule::arith_mod, Left))
+        // .op(Op::prefix(Rule::neg))
+        // .op(Op::postfix(Rule::call_access))
+        // .op(Op::postfix(Rule::array_access))
+        // .op(Op::postfix(Rule::dot_access))
     };
 }
 
@@ -94,13 +97,18 @@ fn parse_definition(pair: Pair<Rule>) -> ParseResult<Definition> {
 // function = { TOK_DEFINE ~ func_name ~ TOK_FUNCTION ~ TOK_LPAREN
 //     ~ func_params ~ TOK_RPAREN
 //     ~ ret_ty
-//     ~ block }
+//     ~ (block | short_block) }
 fn parse_function(pair: Pair<Rule>) -> ParseResult<Function> {
     let mut inner = pair.into_inner();
     let name = inner.next().unwrap().as_str();
     let params = parse_func_params(inner.next().unwrap())?;
     let ret_ty = parse_ret_ty(inner.next().unwrap())?;
-    let block = parse_block(inner.next().unwrap())?;
+    let block_pair = inner.next().unwrap();
+    let block = match block_pair.as_rule() {
+        Rule::block => parse_block(block_pair)?,
+        Rule::short_block => parse_short_block(block_pair)?,
+        _ => unreachable!(),
+    };
     Ok(Function {
         name: name.to_string(),
         meta: Box::<NodeMeta>::default(),
@@ -108,6 +116,17 @@ fn parse_function(pair: Pair<Rule>) -> ParseResult<Function> {
         ret_ty,
         body: block,
     })
+}
+// short_block = { "=>" ~ expr }
+// will be parsed as a block with a single return statement
+fn parse_short_block(pair: Pair<Rule>) -> ParseResult<Block> {
+    let mut inner = pair.into_inner();
+    let expr = parse_expr(inner.next().unwrap())?;
+    let stmt = Stmt::Return(ReturnStmt {
+        meta: Box::<NodeMeta>::default(),
+        expr: Some(expr),
+    });
+    Ok(Block { stmts: vec![stmt] })
 }
 
 // func_params = { typed_ids? }
@@ -264,19 +283,22 @@ fn parse_block(pair: Pair<Rule>) -> ParseResult<Block> {
     for p in inner {
         statements.push(parse_statement(p)?);
     }
-    Ok(Block { statements })
+    Ok(Block { stmts: statements })
 }
 
 // statement = { NEWLINE* ~  (
 //     expr_stmt
 //     | return_stmt
 //  )* ~ NEWLINE }
-fn parse_statement(pair: Pair<Rule>) -> ParseResult<Statement> {
+fn parse_statement(pair: Pair<Rule>) -> ParseResult<Stmt> {
     let rhs = pair.into_inner().next().unwrap();
     match rhs.as_rule() {
-        Rule::expr_stmt => Ok(Statement::Expr(parse_expr_stmt(rhs)?)),
-        Rule::return_stmt => Ok(Statement::Return(parse_return_stmt(rhs)?)),
-        _ => unreachable!(),
+        Rule::expr_stmt => Ok(Stmt::Expr(parse_expr_stmt(rhs)?)),
+        Rule::return_stmt => Ok(Stmt::Return(parse_return_stmt(rhs)?)),
+        _ => {
+            _debug_rule(&rhs);
+            todo!()
+        }
     }
 }
 
@@ -508,16 +530,16 @@ fn parse_prefix(op: Pair<Rule>) -> ParseResult<PrefixOp> {
 }
 // postfix = { call_access | array_access | dot_access }
 fn parse_postfix(op: Pair<Rule>) -> ParseResult<PostfixOp> {
-    let rhs = op.into_inner().next().unwrap();
-    match rhs.as_rule() {
+    let op = op.into_inner().next().unwrap();
+    match op.as_rule() {
         Rule::call_access => Ok(PostfixOp::CallAccess(Box::new(
-            parse_call_access(rhs).unwrap(),
+            parse_call_access(op).unwrap(),
         ))),
         Rule::array_access => Ok(PostfixOp::ArrayAccess(Box::new(
-            parse_array_access(rhs).unwrap(),
+            parse_array_access(op).unwrap(),
         ))),
         Rule::dot_access => Ok(PostfixOp::DotAccess(Box::new(
-            parse_dot_access(rhs).unwrap(),
+            parse_dot_access(op).unwrap(),
         ))),
         _ => unreachable!(),
     }

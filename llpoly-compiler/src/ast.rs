@@ -232,10 +232,10 @@ impl Param {
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    pub statements: Vec<Statement>,
+    pub stmts: Vec<Stmt>,
 }
 #[derive(Debug, Clone)]
-pub enum Statement {
+pub enum Stmt {
     Expr(ExprStmt),
     Return(ReturnStmt),
 }
