@@ -64,7 +64,7 @@ lazy_static::lazy_static! {
 }
 
 #[derive(Parser, Default)]
-#[grammar = "llpoly.pest"]
+#[grammar = "sysy.pest"]
 pub struct PolygonParser {}
 
 impl PolygonParser {

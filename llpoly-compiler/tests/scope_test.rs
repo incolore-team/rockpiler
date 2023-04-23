@@ -1,4 +1,4 @@
-use llpolyc::ir::{
+use rockc::ir::{
     scope::{ScopeCursor, ScopeId, ScopeRegistry},
     value::ValueId,
 };

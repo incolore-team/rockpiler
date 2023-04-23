@@ -1,7 +1,7 @@
 use std::{env, process::ExitCode};
 use std::io::Write;
 
-use llpolyc::{cli_args, driver, VERSION};
+use rockc::{cli_args, driver, VERSION};
 fn init_logger() {
     let log_fmt = |buf: &mut env_logger::fmt::Formatter, record: &log::Record| {
         writeln!(

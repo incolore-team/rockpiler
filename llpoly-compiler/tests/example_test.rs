@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fs, path::PathBuf};
 
-use llpolyc::{cli_args, driver};
+use rockc::{cli_args, driver};
 
 #[test]
 fn test_examples() {
@@ -9,10 +9,10 @@ fn test_examples() {
     let files = glob(examples_dir, |filename| {
         filename
             .to_str()
-            .map(|s| s.ends_with(".llpoly"))
+            .map(|s| s.ends_with(".sy"))
             .unwrap_or(false)
     });
-    let bin_name = "llpolyc".to_string();
+    let bin_name = "rockc".to_string();
     for file in files {
         println!("Compiling file {} ...", file.to_str().unwrap());
         let args = vec![bin_name.clone(), file.to_str().unwrap().to_string()];
