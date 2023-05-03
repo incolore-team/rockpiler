@@ -1,0 +1,201 @@
+grammar = { trans_unit ~ EOI }
+
+trans_unit = { (func_def | decl)* }
+
+decl = { const_decl | var_decl }
+
+const_decl = { KW_CONST ~ basic_type ~ const_def ~ ("," ~ const_def)* ~ ";" }
+
+    basic_type = { KW_INT | KW_FLOAT }
+
+    const_def = { ID ~ ("[" ~ const_expr ~ "]")* ~ "=" ~ const_init_val }
+
+        const_init_val = { const_expr | "{" ~ (const_init_val ~ ("," ~ const_init_val)*)? ~ "}" }
+
+var_decl = { basic_type ~ var_def ~ ("," ~ var_def)* ~ ";" }
+
+    var_def = { 
+        ID ~ ("[" ~ const_expr ~ "]")* ~ "=" ~ init_val 
+        | ID ~ ("[" ~ const_expr ~ "]")*
+    }
+
+    init_val = { expr | "{" ~ (init_val ~ ("," ~ init_val)*)? ~ "}" }
+
+func_def = { func_type ~ ID ~ "(" ~ (func_params)? ~ ")" ~ block }
+
+    func_type = { KW_VOID | KW_INT | KW_FLOAT }
+
+    func_params = { func_param ~ ("," ~ func_param)* }
+
+    func_param = { basic_type ~ ID ~ ("[" ~ "]" ~ ("[" ~ const_expr ~ "]")*)? }
+
+    block = { "{" ~ (block_item)* ~ "}" }
+
+block_item = { decl | stmt }
+
+stmt = {
+    assign_stmt
+    | expr_stmt
+    | block_stmt
+    | if_stmt
+    | if_else_stmt
+    | while_stmt
+    | for_stmt
+    | break_stmt
+    | do_while_stmt
+    | continue_stmt
+    | return_stmt
+}
+
+    assign_stmt = { lhs ~ "=" ~ expr ~ ";" }
+    expr_stmt = { (expr)? ~ ";" }
+    block_stmt = { block }
+    if_stmt = { KW_IF ~ "(" ~ cond ~ ")" ~ stmt }
+    if_else_stmt = { KW_IF ~ "(" ~ cond ~ ")" ~ stmt ~ KW_ELSE ~ stmt }
+    while_stmt = { KW_WHILE ~ "(" ~ cond ~ ")" ~ stmt }
+    for_stmt = { KW_FOR ~ "(" ~ (expr)? ~ ";" ~ (expr)? ~ ";" ~ (expr)? ~ ")" ~ stmt }
+    do_while_stmt = { KW_DO ~ stmt ~ KW_WHILE ~ "(" ~ cond ~ ")" ~ ";" }
+    break_stmt = { KW_BREAK ~ ";" }
+    continue_stmt = { KW_CONTINUE ~ ";" }
+    return_stmt = { KW_RETURN ~ (expr)? ~ ";" }
+
+
+expr = { primary_expr ~ (infix_operator ~ primary_expr)* }
+
+    infix_operator = {
+        ("*" | "/" | "%")
+        | ("+" | "-")
+        | ("<" | ">" | "<=" | ">=")
+        | ("==" | "!=")
+        | ("&&")
+        | ("||")
+    }
+
+cond = { expr }
+
+lhs = { ID ~ (index_access)* }
+
+index_access = { "[" ~ expr ~ "]" }
+
+primary_expr = {
+    call_expr
+    | "(" ~ expr ~ ")"
+    | lhs
+    | number
+}
+
+number = { INT_CONSTANT | FLOAT_CONSTANT }
+
+call_expr = { ID ~ "(" ~ (func_args)? ~ ")" }
+
+func_args = { func_arg ~ ("," ~ func_arg)* }
+
+func_arg = { expr | STRING_LITERAL }
+
+const_expr = { expr }
+
+// Tokens
+KW_INT = { "int" }
+KW_VOID = { "void" }
+KW_CONST = { "const" }
+KW_RETURN = { "return" }
+KW_IF = { "if" }
+KW_ELSE = { "else" }
+KW_FOR = { "for" }
+KW_WHILE = { "while" }
+KW_DO = { "do" }
+KW_BREAK = { "break" }
+KW_CONTINUE = { "continue" }
+
+INT_CONSTANT = { 
+    DECIMAL_CONSTANT
+    | OCTAL_CONSTANT
+    | HEXADECIMAL_CONSTANT
+    | BINARY_CONSTANT
+}
+
+    DECIMAL_CONSTANT = { ASCII_NON_ZERO_DIGIT ~ ASCII_DIGIT* }
+    OCTAL_CONSTANT = { "0" ~ ASCII_OCT_DIGIT* }
+    HEXADECIMAL_CONSTANT = { "0" ~ ("x" | "X") ~ ASCII_HEX_DIGIT+ }
+    BINARY_CONSTANT = { "0" ~ ("b" | "B") ~ ASCII_BINARY_DIGIT+ }
+
+        ASCII_BINARY_DIGIT = { "0" | "1" }
+
+FLOAT_CONSTANT = { DEC_CONSTANT_FLOAT | HEX_CONSTANT_FLOAT }
+
+DEC_CONSTANT_FLOAT = { FRAC_CONSTANT ~ (EXP_PART)? }
+
+HEX_CONSTANT_FLOAT = { "0x" ~ (HEX_FRAC_CONST | ASCII_HEX_DIGIT+) ~ BIN_EXP_PART }
+
+HEX_FRAC_CONST = { 
+    ASCII_HEX_DIGIT+ ~ "." ~ ASCII_HEX_DIGIT*
+    | ASCII_HEX_DIGIT* ~ "." ~ ASCII_HEX_DIGIT+
+}
+
+FRAC_CONSTANT = { 
+    ASCII_NON_ZERO_DIGIT ~ ASCII_DIGIT* ~ "." ~ ASCII_DIGIT*
+    | ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+
+    | "." ~ ASCII_DIGIT+
+}
+
+EXP_PART = { ("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
+
+BIN_EXP_PART = { ("p" | "P") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
+
+ID = ${ IDENTIFIER_START ~ IDENTIFIER_PART* }
+
+IDENTIFIER_PART = _{
+  IDENTIFIER_START |
+  &(
+    NONSPACING_MARK |
+    DIACRITIC | // not sure about this, spec says "Combining spacing mark (Mc)"
+    DECIMAL_NUMBER |
+    CONNECTOR_PUNCTUATION |
+    "\u{200C}" |
+    "\u{200D}"
+  ) ~ CHAR
+}
+
+IDENTIFIER_START = _{
+  &(UNICODE_LETTER | "$" | "_") ~ CHAR |
+  "\\u" ~ UNICODE_ESCAPE_SEQUENCE
+}
+
+    UNICODE_LETTER = _{
+        UPPERCASE_LETTER |
+        LOWERCASE_LETTER |
+        TITLECASE_LETTER |
+        MODIFIER_LETTER |
+        OTHER_LETTER |
+        LETTER_NUMBER
+    }
+    UNICODE_ESCAPE_SEQUENCE = @{ ASCII_HEX_DIGIT{4} }
+
+STRING_LITERAL = { "\"" ~ (CHAR | ESCAPE_SEQUENCE)* ~ "\"" }
+
+CHAR = _{ !("\"" | "\\" | "\n") ~ ANY }
+
+ESCAPE_SEQUENCE = { "\\" ~ ("\"" | "\\" | "n" | "r" | "t") }
+
+KW_FLOAT = { "float" }
+
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+
+ASCII_NON_ZERO_DIGIT = _{ '1'..'9' }
+
+ASCII_DIGIT = _{ '0'..'9' }
+
+ASCII_HEX_DIGIT = _{ '0'..'9' | 'a'..'f' | 'A'..'F' }
+
+ASCII_ALPHA = _{ 'a'..'z' | 'A'..'Z' }
+
+ASCII_ALPHANUMERIC = _{ '0'..'9' | 'a'..'z' | 'A'..'Z' }
+
+COMMENT = _{
+    SINGLE_LINE_COMMENT
+    | MULTI_LINE_COMMENT
+}
+
+SINGLE_LINE_COMMENT = _{ "//" ~ (!("\n" | "\r") ~ ANY)* }
+
+MULTI_LINE_COMMENT = _{ "/*" ~ (!("*/") ~ ANY)* ~ "*/" }

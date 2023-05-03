@@ -1,13 +1,18 @@
 [package]
-name = "llpolyc"
+name = "rockc"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-env_logger = "0.10.0"
+clap = "4.2.2"
+env_logger = "0.9"
 lazy_static = "1.4.0"
+derive-new = "0.5.9"
+strum = "0.24"
+strum_macros = "0.24"
+enum_dispatch = "0.3.11"
 log = "0.4.17"
 pest = "2.5.5"
 pest_derive = "2.5.5"
