@@ -1,44 +1,34 @@
-grammar = { trans_unit ~ EOI }
-
-trans_unit = { (func_def | decl)* }
-
-decl = { const_decl | var_decl }
-
-const_decl = { KW_CONST ~ basic_type ~ const_def ~ ("," ~ const_def)* ~ ";" }
-
-    basic_type = { KW_INT | KW_FLOAT }
-
-    const_def = { ID ~ ("[" ~ const_expr ~ "]")* ~ "=" ~ const_init_val }
-
-        const_init_val = { const_expr | "{" ~ (const_init_val ~ ("," ~ const_init_val)*)? ~ "}" }
-
-var_decl = { basic_type ~ var_def ~ ("," ~ var_def)* ~ ";" }
+grammar = { SOI ~ trans_unit ~ EOI }
+trans_unit = { (func_decl | var_decls)* }
+var_decls = { const_var_decls | normal_var_decls }
+basic_type = { KW_INT | KW_FLOAT }
+const_var_decls = { KW_CONST ~ basic_type ~ var_def ~ ("," ~ var_def)* ~ ";" }
+normal_var_decls = { basic_type ~ var_def ~ ("," ~ var_def)* ~ ";" }
 
     var_def = { 
-        ID ~ ("[" ~ const_expr ~ "]")* ~ "=" ~ init_val 
-        | ID ~ ("[" ~ const_expr ~ "]")*
+        id ~ ("[" ~ const_expr ~ "]")* ~ "=" ~ init_val 
+        | id ~ ("[" ~ const_expr ~ "]")*
     }
 
-    init_val = { expr | "{" ~ (init_val ~ ("," ~ init_val)*)? ~ "}" }
+    init_val = { expr | array_init_val }
+	array_init_val = { "{" ~ (init_val ~ ("," ~ init_val)*)? ~ "}" }
 
-func_def = { func_type ~ ID ~ "(" ~ (func_params)? ~ ")" ~ block }
-
+func_decl = { func_type ~ id ~ "(" ~ (func_params)? ~ ")" ~ block }
     func_type = { KW_VOID | KW_INT | KW_FLOAT }
-
     func_params = { func_param ~ ("," ~ func_param)* }
-
-    func_param = { basic_type ~ ID ~ ("[" ~ "]" ~ ("[" ~ const_expr ~ "]")*)? }
-
+    func_param = { basic_type ~ id ~ ("[" ~ "]" ~ ("[" ~ const_expr ~ "]")*)? }
     block = { "{" ~ (block_item)* ~ "}" }
 
-block_item = { decl | stmt }
+const_expr = { expr }
+
+block_item = { var_decls | stmt }
 
 stmt = {
     assign_stmt
     | expr_stmt
     | block_stmt
-    | if_stmt
     | if_else_stmt
+    | if_stmt
     | while_stmt
     | for_stmt
     | break_stmt
@@ -47,7 +37,7 @@ stmt = {
     | return_stmt
 }
 
-    assign_stmt = { lhs ~ "=" ~ expr ~ ";" }
+    assign_stmt = { lhs_expr ~ "=" ~ expr ~ ";" }
     expr_stmt = { (expr)? ~ ";" }
     block_stmt = { block }
     if_stmt = { KW_IF ~ "(" ~ cond ~ ")" ~ stmt }
@@ -59,43 +49,64 @@ stmt = {
     continue_stmt = { KW_CONTINUE ~ ";" }
     return_stmt = { KW_RETURN ~ (expr)? ~ ";" }
 
+expr = { prefix_op* ~ primary_expr ~ postfix_op* ~ (infix_op ~ prefix_op* ~ primary_expr ~ postfix_op* )* }
 
-expr = { primary_expr ~ (infix_operator ~ primary_expr)* }
+prefix_op = _{ prefix_incr | prefix_decr | prefix_not | prefix_bit_not | prefix_pos | prefix_neg }
+    prefix_incr = { "++" }
+    prefix_decr = { "--" }
+    prefix_not = { "!" | "not"}
+    prefix_bit_not = { "~" }
+    prefix_pos = { "+" }
+    prefix_neg = { "-" }
 
-    infix_operator = {
-        ("*" | "/" | "%")
-        | ("+" | "-")
-        | ("<" | ">" | "<=" | ">=")
-        | ("==" | "!=")
-        | ("&&")
-        | ("||")
-    }
+infix_op = _{ infix_logic | infix_cmp | infix_bitwise | infix_arith }
+    infix_bitwise = _{ bit_and | bit_or | bit_xor | bit_shl | bit_shr }
+        bit_and = { "&" }
+        bit_or = { "|" }
+        bit_xor = { "^" }
+        bit_shl = { "<<" }
+        bit_shr = { ">>" }
+    infix_logic = _{ logic_and | logic_or }
+        logic_and = { "and" | "&&" }
+        logic_or = { "or" | "||" }
+    infix_arith = _{ arith_add | arith_sub | arith_mul | arith_div | arith_mod }
+        arith_add = { "+" }
+        arith_sub = { "-" }
+        arith_mul = { "*" }
+        arith_div = { "/" }
+        arith_mod = { "%" }
+    infix_cmp = _{ cmp_eq | cmp_ne | cmp_le | cmp_ge | cmp_lt | cmp_gt}
+        cmp_eq = { "==" }
+        cmp_ne = { "!=" }
+        cmp_le = { "<=" }
+        cmp_ge = { ">=" }
+        cmp_lt = { "<" }
+        cmp_gt = { ">" }
 
-cond = { expr }
+postfix_op = _{ postfix_incr | postfix_decr | call_access | dot_access | index_access}
+    postfix_incr = { "++" }
+    postfix_decr = { "--" }
+    call_access = { "." ~ id ~ "(" ~ call_args? ~ ")" }
+    call_args = { expr ~ ("," ~ expr)* }
+    dot_access = { "." ~ id }
 
-lhs = { ID ~ (index_access)* }
+cond = _{ expr }
 
-index_access = { "[" ~ expr ~ "]" }
-
-primary_expr = {
-    call_expr
-    | "(" ~ expr ~ ")"
-    | lhs
-    | number
-}
-
-number = { INT_CONSTANT | FLOAT_CONSTANT }
-
-call_expr = { ID ~ "(" ~ (func_args)? ~ ")" }
+primary_expr = { group_expr | call_expr | id | lhs_expr | literal_expr }
+    lhs_expr = { id ~ (index_access | dot_access)* }
+        index_access = { "[" ~ expr ~ "]" }
+    group_expr = { "(" ~ expr ~ ")" }
+    literal_expr = { number | char | string }
+    call_expr = { id ~ "(" ~ (func_args)? ~ ")" }
 
 func_args = { func_arg ~ ("," ~ func_arg)* }
 
-func_arg = { expr | STRING_LITERAL }
+func_arg = { expr }
 
-const_expr = { expr }
 
 // Tokens
 KW_INT = { "int" }
+KW_FLOAT = { "float" }
 KW_VOID = { "void" }
 KW_CONST = { "const" }
 KW_RETURN = { "return" }
@@ -107,87 +118,56 @@ KW_DO = { "do" }
 KW_BREAK = { "break" }
 KW_CONTINUE = { "continue" }
 
-INT_CONSTANT = { 
-    DECIMAL_CONSTANT
-    | OCTAL_CONSTANT
-    | HEXADECIMAL_CONSTANT
-    | BINARY_CONSTANT
+number = { float | int}
+
+int = { dec_int | hex_int | oct_int | bin_int }
+    dec_int = { dec_const ~ !(exp_part | ".") }
+    dec_const = { non_zero_digit ~ dec_digit* }
+    oct_int = { "0" ~ ASCII_OCT_DIGIT* ~ !(exp_part | ".") }
+    hex_int = { "0" ~ ("x" | "X") ~ hex_digit+ ~ !(exp_part | ".") }
+    bin_int = { "0" ~ ("b" | "B") ~ bin_digit+ }
+
+        bin_digit = { "0" | "1" }
+
+float = { dec_flot | hex_float }
+
+dec_flot = { dec_frac ~ (exp_part)? | dec_digit+ ~ exp_part }
+
+hex_float = { "0x" ~ (hex_frac | hex_digit+) ~ bin_exp_part }
+
+hex_frac = { 
+    hex_digit+ ~ "." ~ hex_digit*
+    | hex_digit* ~ "." ~ hex_digit+
 }
 
-    DECIMAL_CONSTANT = { ASCII_NON_ZERO_DIGIT ~ ASCII_DIGIT* }
-    OCTAL_CONSTANT = { "0" ~ ASCII_OCT_DIGIT* }
-    HEXADECIMAL_CONSTANT = { "0" ~ ("x" | "X") ~ ASCII_HEX_DIGIT+ }
-    BINARY_CONSTANT = { "0" ~ ("b" | "B") ~ ASCII_BINARY_DIGIT+ }
-
-        ASCII_BINARY_DIGIT = { "0" | "1" }
-
-FLOAT_CONSTANT = { DEC_CONSTANT_FLOAT | HEX_CONSTANT_FLOAT }
-
-DEC_CONSTANT_FLOAT = { FRAC_CONSTANT ~ (EXP_PART)? }
-
-HEX_CONSTANT_FLOAT = { "0x" ~ (HEX_FRAC_CONST | ASCII_HEX_DIGIT+) ~ BIN_EXP_PART }
-
-HEX_FRAC_CONST = { 
-    ASCII_HEX_DIGIT+ ~ "." ~ ASCII_HEX_DIGIT*
-    | ASCII_HEX_DIGIT* ~ "." ~ ASCII_HEX_DIGIT+
+dec_frac = {
+    dec_digit+ ~ "." ~ dec_digit*
+    | "." ~ dec_digit+
 }
 
-FRAC_CONSTANT = { 
-    ASCII_NON_ZERO_DIGIT ~ ASCII_DIGIT* ~ "." ~ ASCII_DIGIT*
-    | ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+
-    | "." ~ ASCII_DIGIT+
-}
+exp_part = { ("e" | "E") ~ ("+" | "-")? ~ dec_digit+ }
 
-EXP_PART = { ("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
+bin_exp_part = { ("p" | "P") ~ ("+" | "-")? ~ dec_digit+ }
 
-BIN_EXP_PART = { ("p" | "P") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
-
-ID = ${ IDENTIFIER_START ~ IDENTIFIER_PART* }
-
-IDENTIFIER_PART = _{
-  IDENTIFIER_START |
-  &(
-    NONSPACING_MARK |
-    DIACRITIC | // not sure about this, spec says "Combining spacing mark (Mc)"
-    DECIMAL_NUMBER |
-    CONNECTOR_PUNCTUATION |
-    "\u{200C}" |
-    "\u{200D}"
-  ) ~ CHAR
-}
-
-IDENTIFIER_START = _{
-  &(UNICODE_LETTER | "$" | "_") ~ CHAR |
-  "\\u" ~ UNICODE_ESCAPE_SEQUENCE
-}
-
-    UNICODE_LETTER = _{
-        UPPERCASE_LETTER |
-        LOWERCASE_LETTER |
-        TITLECASE_LETTER |
-        MODIFIER_LETTER |
-        OTHER_LETTER |
-        LETTER_NUMBER
-    }
-    UNICODE_ESCAPE_SEQUENCE = @{ ASCII_HEX_DIGIT{4} }
-
-STRING_LITERAL = { "\"" ~ (CHAR | ESCAPE_SEQUENCE)* ~ "\"" }
-
-CHAR = _{ !("\"" | "\\" | "\n") ~ ANY }
-
-ESCAPE_SEQUENCE = { "\\" ~ ("\"" | "\\" | "n" | "r" | "t") }
-
-KW_FLOAT = { "float" }
+string = ${ "\"" ~ inner_str ~ "\"" }
+char = ${ "'" ~ inner_chr ~ "'" }
+id = @{ ("_" | "$" | alpha | unicode) ~ ("_" | "$" | alpha_num | unicode)* }
+inner_str = @{ (!("\"" | "\\") ~ ANY)* ~ (escape ~ inner_str)? }
+inner_chr = @{ escape | ANY }
+escape = @{ "\\" ~ ("\"" | "\\" | "r" | "n" | "t" | "0" | "'" | code | unicode) }
+code = @{ "x" ~ hex_digit_atomic{2} }
+unicode = @{ "u" ~ "{" ~ hex_digit_atomic{2, 6} ~ "}" }
+hex_digit_atomic = @{ '0'..'9' | 'a'..'f' | 'A'..'F' }
+alpha = _{ 'a'..'z' | 'A'..'Z' }
+alpha_num = _{ alpha | dec_digit }
 
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 
-ASCII_NON_ZERO_DIGIT = _{ '1'..'9' }
+non_zero_digit = _{ '1'..'9' }
 
-ASCII_DIGIT = _{ '0'..'9' }
+dec_digit = _{ '0'..'9' }
 
-ASCII_HEX_DIGIT = _{ '0'..'9' | 'a'..'f' | 'A'..'F' }
-
-ASCII_ALPHA = _{ 'a'..'z' | 'A'..'Z' }
+hex_digit = _{ '0'..'9' | 'a'..'f' | 'A'..'F' }
 
 ASCII_ALPHANUMERIC = _{ '0'..'9' | 'a'..'z' | 'A'..'Z' }
 
