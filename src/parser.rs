@@ -1,4 +1,4 @@
-use log::{trace};
+use log::trace;
 use pest::{
     error::{Error as ParseError, ErrorVariant},
     iterators::Pair,
@@ -183,6 +183,7 @@ pub fn parse_var_def(pair: Pair<Rule>, type_: &Type, is_const: bool) -> ParseRes
         type_: type_.clone(),
         is_const,
         init,
+        sema_ref: None,
     })
 }
 
@@ -244,6 +245,7 @@ pub fn parse_func_decl(pair: Pair<Rule>) -> ParseResult<FuncDecl> {
         params,
         ret_ty,
         body: block.unwrap(),
+        sema_ref: None,
     })
 }
 
@@ -389,7 +391,11 @@ pub fn parse_lhs_expr(pair: Pair<Rule>) -> ParseResult<LhsExpr> {
         }
     }
 
-    Ok(LhsExpr::MixedAccess { id, access })
+    Ok(LhsExpr::MixedAccess(MixedAccess {
+        id,
+        access,
+        sema_ref: None,
+    }))
 }
 
 // index_access = { "[" ~ expr ~ "]" }
@@ -600,6 +606,7 @@ pub fn parse_call_expr(pair: Pair<Rule>) -> ParseResult<CallExpr> {
     Ok(CallExpr {
         id,
         args: args.unwrap_or(Vec::new()),
+        sema_ref: None,
     })
 }
 
@@ -716,7 +723,11 @@ pub fn parse_call_access(pair: Pair<Rule>) -> ParseResult<CallAccess> {
         None => Vec::new(),
     };
 
-    Ok(CallAccess { id, args })
+    Ok(CallAccess {
+        id,
+        args,
+        sema_ref: None,
+    })
 }
 
 // dot_access = { "." ~ ID }
@@ -727,6 +738,7 @@ pub fn parse_dot_access(pair: Pair<Rule>) -> ParseResult<DotAccess> {
     let field = inner.next().unwrap().as_str();
     Ok(DotAccess {
         field: field.to_string(),
+        sema_ref: None,
     })
 }
 
@@ -796,13 +808,12 @@ pub fn parse_number(pair: Pair<Rule>) -> ParseResult<Literal> {
 use std::num::ParseIntError;
 
 fn parse_hex_float(s: &str) -> Result<f64, ParseIntError> {
-    let sign = if s.starts_with('-') {
-        -1.0
-    } else {
-        1.0
-    };
-    
-    let without_prefix = s.trim_start_matches("-").trim_start_matches("0x").trim_start_matches("0X");
+    let sign = if s.starts_with('-') { -1.0 } else { 1.0 };
+
+    let without_prefix = s
+        .trim_start_matches("-")
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
     let mut parts = without_prefix.splitn(2, |c| c == 'p' || c == 'P');
     let mantissa = parts.next().unwrap();
     let exponent = parts.next().unwrap_or("0");
@@ -882,7 +893,7 @@ pub fn parse_const_expr(pair: Pair<Rule>) -> ParseResult<Box<Expr>> {
 // id = @{ ("_" | "$" | alpha | unicode) ~ ("_" | "$" | alpha_num | unicode)* }
 pub fn parse_id(pair: Pair<Rule>) -> ParseResult<IdentExpr> {
     let id = pair.as_str().to_string();
-    Ok(IdentExpr { name: id })
+    Ok(IdentExpr { id, sema_ref: None })
 }
 
 // string = ${ quote ~ inner_str ~ quote }

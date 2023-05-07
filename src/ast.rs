@@ -1,3 +1,5 @@
+use crate::sema::SemaRef;
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct TransUnit {
     pub func_decls: Vec<FuncDecl>,
@@ -48,6 +50,8 @@ pub enum PostfixOp {
 pub struct CallAccess {
     pub id: String,
     pub args: Vec<Box<Expr>>,
+
+    pub sema_ref: Option<SemaRef>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -58,6 +62,8 @@ pub struct IndexAccess {
 #[derive(Debug, PartialEq, Clone)]
 pub struct DotAccess {
     pub field: String,
+
+    pub sema_ref: Option<SemaRef>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -66,6 +72,8 @@ pub struct FuncDecl {
     pub params: Vec<Param>,
     pub ret_ty: Type,
     pub body: Block,
+
+    pub sema_ref: Option<SemaRef>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -74,6 +82,8 @@ pub struct VarDecl {
     pub type_: Type,
     pub is_const: bool,
     pub init: Option<InitVal>,
+
+    pub sema_ref: Option<SemaRef>,
 }
 
 impl From<Param> for VarDecl {
@@ -83,6 +93,7 @@ impl From<Param> for VarDecl {
             type_: param.type_,
             is_const: false,
             init: None,
+            sema_ref: param.sema_ref,
         }
     }
 }
@@ -91,17 +102,30 @@ impl From<Param> for VarDecl {
 pub struct Param {
     pub name: String,
     pub type_: Type,
+
+    pub sema_ref: Option<SemaRef>,
 }
 
 impl Param {
     pub fn new(name: String, type_: Type) -> Self {
-        Self { name, type_ }
+        Self {
+            name,
+            type_,
+            sema_ref: None,
+        }
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum LhsExpr {
-    MixedAccess { id: String, access: Vec<LhsAccess> },
+    MixedAccess(MixedAccess),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct MixedAccess {
+    pub id: String,
+    pub access: Vec<LhsAccess>,
+    pub sema_ref: Option<SemaRef>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -221,11 +245,15 @@ pub struct PostfixExpr {
 pub struct CallExpr {
     pub id: String,
     pub args: Vec<Box<Expr>>,
+
+    pub sema_ref: Option<SemaRef>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct IdentExpr {
-    pub name: String,
+    pub id: String,
+
+    pub sema_ref: Option<SemaRef>,
 }
 
 #[derive(Debug, PartialEq, Clone)]

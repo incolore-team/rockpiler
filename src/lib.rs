@@ -11,3 +11,4 @@ pub mod scope;
 pub mod symbol;
 pub mod ir;
 pub mod sema;
+pub mod ir_builder;

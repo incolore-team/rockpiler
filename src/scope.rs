@@ -11,8 +11,8 @@ pub struct Scope {
 
 type SymbolArena = Arena<Symbol>;
 type ScopeArena = Arena<Scope>;
-type SymbolId = Id<Symbol>;
-type ScopeId = Id<Scope>;
+pub type SymbolId = Id<Symbol>;
+pub type ScopeId = Id<Scope>;
 
 impl Scope {
     // 创建一个新的作用域
@@ -91,6 +91,10 @@ impl SymbolTable {
     // 打印符号表，并返回字符串
     pub fn print_table(&self) -> String {
         self.print_scope(self.current_scope, 0)
+    }
+
+    pub fn scope_id(&self) -> ScopeId {
+        self.current_scope
     }
 
     // 打印作用域，并返回字符串
