@@ -1,47 +1,44 @@
+use crate::ast::{FuncDecl, VarDecl, Type};
 
-#[derive(Clone,PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TypeSymbol {
-    name: String,
+    type_: Type,
 }
 
-#[derive(Clone,PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FuncSymbol {
-    name: String,
+    func: FuncDecl,
 }
 
-#[derive(Clone,PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VarSymbol {
-    name: String,
+    var: VarDecl,
 }
 
 impl TypeSymbol {
-    pub fn new(name: &str) -> Self {
+    pub fn new(type_: Type) -> Self {
         Self {
-            name: name.to_string(),
+            type_
         }
     }
 }
 
 impl FuncSymbol {
-    pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-        }
+    pub fn new(func: FuncDecl) -> Self {
+        Self { func }
     }
 }
 
 impl VarSymbol {
-    pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-        }
+    pub fn new(var: VarDecl) -> Self {
+        Self { var }
     }
 }
-#[derive(Clone)]
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Symbol {
     Dummy,
     Type(TypeSymbol),
     Func(FuncSymbol),
     Var(VarSymbol),
 }
-

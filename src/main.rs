@@ -45,10 +45,10 @@ fn test_all() {
 
 #[test]
 fn test_single() {
-    env_logger::builder().filter_level(log::LevelFilter::Debug).init();
+    env_logger::builder().filter_level(log::LevelFilter::Trace).init();
 
     let dir = "./tests/functional/";
-    let file_stem = "000";
+    let file_stem = "24_if_test5";
     let output_path = format!("{}{}.ll", dir, file_stem);
     let input_path = format!("{}{}.sy", dir, file_stem);
     let args = Args::parse_from(&["rockc", &input_path, "-o", &output_path]);

@@ -76,6 +76,17 @@ pub struct VarDecl {
     pub init: Option<InitVal>,
 }
 
+impl From<Param> for VarDecl {
+    fn from(param: Param) -> Self {
+        Self {
+            name: param.name,
+            type_: param.type_,
+            is_const: false,
+            init: None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Param {
     pub name: String,

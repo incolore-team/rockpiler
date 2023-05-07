@@ -63,7 +63,9 @@ impl SymbolTable {
     // 进入一个新的作用域
     pub fn enter_scope(&mut self) {
         let new_scope = self.scope_arena.alloc(Scope::new(Some(self.current_scope)));
-        self.scope_arena[self.current_scope].children.push(new_scope);
+        self.scope_arena[self.current_scope]
+            .children
+            .push(new_scope);
         self.current_scope = new_scope;
     }
 
@@ -84,6 +86,43 @@ impl SymbolTable {
     // 查找一个符号
     pub fn lookup_symbol(&self, name: &str) -> Option<SymbolId> {
         self.scope_arena[self.current_scope].lookup(name, &self.scope_arena)
+    }
+
+    // 打印符号表，并返回字符串
+    pub fn print_table(&self) -> String {
+        self.print_scope(self.current_scope, 0)
+    }
+
+    // 打印作用域，并返回字符串
+    fn print_scope(&self, scope_id: ScopeId, level: usize) -> String {
+        let mut result = String::new();
+        let scope = &self.scope_arena[scope_id];
+        for (name, symbol_id) in &scope.symbols {
+            let symbol = &self.symbol_arena[*symbol_id];
+            result += &format!("{:indent$}{}: {:?}\n", "", name, symbol, indent = level * 4);
+        }
+        for child_id in &scope.children {
+            result += &self.print_scope(*child_id, level + 1);
+        }
+        result
+    }
+}
+
+use std::fmt;
+
+impl fmt::Debug for Scope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Symbols: {:?}", self.symbols)?;
+        writeln!(f, "Parent: {:?}", self.parent)?;
+        writeln!(f, "Children: {:?}", self.children)
+    }
+}
+
+impl fmt::Debug for SymbolTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Symbol Arena: {:?}", self.symbol_arena)?;
+        writeln!(f, "Scope Arena: {:?}", self.scope_arena)?;
+        writeln!(f, "Current Scope: {:?}", self.current_scope)
     }
 }
 
@@ -126,5 +165,46 @@ mod tests {
         // 在根作用域查询符号b，应该找不到
         let not_found_b_in_root = symbol_table.lookup_symbol("b");
         assert_eq!(not_found_b_in_root, None);
+    }
+
+    #[test]
+    fn test_symbol_table2() {
+        let mut symbol_table = SymbolTable::new();
+
+        // 在根作用域插入符号a
+        let _ = symbol_table.insert_symbol("a".to_string(), Symbol::Dummy);
+
+        // 进入一个新的作用域
+        symbol_table.enter_scope();
+
+        // 在子作用域插入符号b
+        let _ = symbol_table.insert_symbol("b".to_string(), Symbol::Dummy);
+
+        // 在子作用域插入符号c
+        let _ = symbol_table.insert_symbol("c".to_string(), Symbol::Dummy);
+
+        // 进入一个新的作用域
+        symbol_table.enter_scope();
+
+        // 在子子作用域插入符号d
+        let _ = symbol_table.insert_symbol("d".to_string(), Symbol::Dummy);
+
+        // 在子子作用域插入符号e
+        let _ = symbol_table.insert_symbol("e".to_string(), Symbol::Dummy);
+
+        // 打印符号表
+        symbol_table.print_table();
+
+        // 离开子子作用域
+        symbol_table.leave_scope();
+
+        // 打印符号表
+        symbol_table.print_table();
+
+        // 离开子作用域
+        symbol_table.leave_scope();
+
+        // 打印符号表
+        symbol_table.print_table();
     }
 }
