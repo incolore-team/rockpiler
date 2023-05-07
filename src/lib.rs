@@ -7,3 +7,6 @@ pub mod cli;
 pub mod driver;
 pub mod parser;
 pub mod ast;
+pub mod scope;
+pub mod symbol;
+pub mod ir;
