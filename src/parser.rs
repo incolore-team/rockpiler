@@ -385,7 +385,7 @@ pub fn parse_lhs_expr(pair: Pair<Rule>) -> ParseResult<LhsExpr> {
             }
             Rule::dot_access => {
                 let dot = parse_dot_access(access_pair)?;
-                access.push(LhsAccess::Dot(dot.field));
+                access.push(LhsAccess::Dot(dot));
             }
             _ => unreachable!(),
         }
@@ -526,18 +526,27 @@ pub fn parse_expr(pair: Pair<Rule>) -> ParseResult<Box<Expr>> {
                 lhs: Box::new(lhs),
                 op: parse_infix_op(op).unwrap(),
                 rhs: Box::new(rhs),
+
+                infer_ty: None,
+                infer_val: None,
             })
         })
         .map_prefix(|op, rhs| {
             Expr::Prefix(PrefixExpr {
                 op: parse_prefix_op(op).unwrap(),
                 rhs: Box::new(rhs),
+
+                infer_ty: None,
+                infer_val: None,
             })
         })
         .map_postfix(|lhs, op| {
             Expr::Postfix(PostfixExpr {
                 lhs: Box::new(lhs),
                 op: parse_postfix_op(op).unwrap(),
+
+                infer_ty: None,
+                infer_val: None,
             })
         })
         .parse(inner.into_iter());
@@ -607,6 +616,9 @@ pub fn parse_call_expr(pair: Pair<Rule>) -> ParseResult<CallExpr> {
         id,
         args: args.unwrap_or(Vec::new()),
         sema_ref: None,
+
+        infer_ty: None,
+        infer_val: None,
     })
 }
 

@@ -131,8 +131,9 @@ pub struct MixedAccess {
 #[derive(Debug, PartialEq, Clone)]
 pub enum LhsAccess {
     Index(Box<Expr>),
-    Dot(String),
+    Dot(DotAccess),
 }
+
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Block {
@@ -197,14 +198,6 @@ pub struct DoWhileStmt {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr {
-    Infix(InfixExpr),
-    Prefix(PrefixExpr),
-    Postfix(PostfixExpr),
-    Primary(PrimaryExpr),
-}
-
-#[derive(Debug, PartialEq, Clone)]
 pub enum InitVal {
     Expr(Box<Expr>),
     ArrayInitVal(ArrayInitVal),
@@ -212,6 +205,16 @@ pub enum InitVal {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ArrayInitVal(pub Vec<InitVal>);
+
+// ===================== Expr =====================
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Expr {
+    Infix(InfixExpr),
+    Prefix(PrefixExpr),
+    Postfix(PostfixExpr),
+    Primary(PrimaryExpr),
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum PrimaryExpr {
@@ -227,18 +230,27 @@ pub struct InfixExpr {
     pub lhs: Box<Expr>,
     pub op: InfixOp,
     pub rhs: Box<Expr>,
+
+    pub infer_ty: Option<Type>,
+    pub infer_val: Option<Literal>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PrefixExpr {
     pub op: PrefixOp,
     pub rhs: Box<Expr>,
+
+    pub infer_ty: Option<Type>,
+    pub infer_val: Option<Literal>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PostfixExpr {
     pub lhs: Box<Expr>,
     pub op: PostfixOp,
+
+    pub infer_ty: Option<Type>,
+    pub infer_val: Option<Literal>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -247,6 +259,10 @@ pub struct CallExpr {
     pub args: Vec<Box<Expr>>,
 
     pub sema_ref: Option<SemaRef>,
+
+
+    pub infer_ty: Option<Type>,
+    pub infer_val: Option<Literal>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -265,6 +281,8 @@ pub enum Literal {
     String(String),
 }
 
+// ===================== End Expr =====================
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
     Builtin(BuiltinType),
@@ -273,6 +291,7 @@ pub enum Type {
     Record(RecordType),
     Function(FunctionType),
 }
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum BuiltinType {
     Void,
@@ -288,10 +307,53 @@ pub enum BuiltinType {
     Float,
     Double,
 }
+impl Type {
+    pub fn is_arithmetic(&self) -> bool {
+        match self {
+            Type::Builtin(builtin) => builtin.is_arithmetic(),
+            Type::Pointer(_) | Type::Array(_) | Type::Record(_) | Type::Function(_) => false,
+        }
+    }
+
+    pub fn is_integer(&self) -> bool {
+        match self {
+            Type::Builtin(builtin) => builtin.is_integer(),
+            Type::Pointer(_) | Type::Array(_) | Type::Record(_) | Type::Function(_) => false,
+        }
+    }
+}
+
+impl BuiltinType {
+    pub fn is_arithmetic(&self) -> bool {
+        !matches!(
+            self,
+            BuiltinType::Void | BuiltinType::Bool | BuiltinType::Float | BuiltinType::Double
+        )
+    }
+
+    pub fn is_integer(&self) -> bool {
+        matches!(
+            self,
+            BuiltinType::UChar | BuiltinType::Char | BuiltinType::UShort |
+            BuiltinType::Short | BuiltinType::UInt | BuiltinType::Int |
+            BuiltinType::UInt64 | BuiltinType::Int64
+        )
+    }
+}
+
+
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PointerType {
     pub type_: Box<Type>,
+}
+
+impl PointerType {
+    pub fn new(type_: Type) -> Self {
+        Self {
+            type_: Box::new(type_),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
