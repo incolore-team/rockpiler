@@ -41,7 +41,18 @@ pub fn _debug_rule(name: &str, pair: &Pair<Rule>) {
 }
 
 lazy_static::lazy_static! {
-    static ref PRATT_PARSER: PrattParser<Rule> = {
+    // lhs_expr = { id ~ (index_access | dot_access)* }
+    static ref PRATT_PARSER_LHS_EXPR : PrattParser<Rule> = {
+        use pest::pratt_parser::*;
+        let pratt = PrattParser::new()
+            .op(Op::postfix(Rule::index_access)
+                | Op::postfix(Rule::dot_access));
+        pratt
+    };
+}
+
+lazy_static::lazy_static! {
+    static ref PRATT_PARSER_EXPR: PrattParser<Rule> = {
         use pest::pratt_parser::*;
         // Precedence is defined lowest to highest
         let pratt = PrattParser::new()
@@ -198,7 +209,7 @@ pub fn parse_init_val(pair: Pair<Rule>) -> ParseResult<InitVal> {
         }
         Rule::array_init_val => {
             let array_init_val = parse_array_init_val(inner)?;
-            Ok(InitVal::ArrayInitVal(array_init_val))
+            Ok(InitVal::Array(array_init_val))
         }
         _ => unreachable!(),
     }
@@ -321,10 +332,6 @@ pub fn parse_stmt(pair: Pair<Rule>) -> ParseResult<Box<Stmt>> {
     _debug_rule("parse_stmt", &pair);
     let inner = pair.into_inner().next().unwrap();
     match inner.as_rule() {
-        Rule::assign_stmt => {
-            let assign_stmt = parse_assign_stmt(inner)?;
-            Ok(Box::new(Stmt::Assign(assign_stmt)))
-        }
         Rule::expr_stmt => {
             let expr_stmt = parse_expr_stmt(inner)?;
             Ok(Box::new(Stmt::Expr(expr_stmt)))
@@ -339,7 +346,7 @@ pub fn parse_stmt(pair: Pair<Rule>) -> ParseResult<Box<Stmt>> {
         }
         Rule::if_stmt => {
             let if_stmt = parse_if_stmt(inner)?;
-            Ok(Box::new(Stmt::If(if_stmt)))
+            Ok(Box::new(Stmt::IfElse(if_stmt)))
         }
         Rule::while_stmt => {
             let while_stmt = parse_while_stmt(inner)?;
@@ -369,49 +376,11 @@ pub fn parse_stmt(pair: Pair<Rule>) -> ParseResult<Box<Stmt>> {
     }
 }
 
-// lhs = { ID ~ (index_access | dot_access)+ }
-pub fn parse_lhs_expr(pair: Pair<Rule>) -> ParseResult<LhsExpr> {
-    _debug_rule("parse_lhs_expr", &pair);
-    let mut inner = pair.into_inner();
-    let id = inner.next().unwrap().as_str().to_string();
-
-    let mut access = Vec::new();
-
-    for access_pair in inner {
-        match access_pair.as_rule() {
-            Rule::index_access => {
-                let expr = parse_index_access(access_pair)?;
-                access.push(LhsAccess::Index(expr));
-            }
-            Rule::dot_access => {
-                let dot = parse_dot_access(access_pair)?;
-                access.push(LhsAccess::Dot(dot));
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    Ok(LhsExpr::MixedAccess(MixedAccess {
-        id,
-        access,
-        sema_ref: None,
-    }))
-}
-
 // index_access = { "[" ~ expr ~ "]" }
 pub fn parse_index_access(pair: Pair<Rule>) -> ParseResult<Box<Expr>> {
     _debug_rule("parse_index_access", &pair);
     let expr = parse_expr(pair.into_inner().next().unwrap())?;
     Ok(expr)
-}
-
-// assign_stmt = { lhs ~ "=" ~ expr ~ ";" }
-pub fn parse_assign_stmt(pair: Pair<Rule>) -> ParseResult<AssignStmt> {
-    _debug_rule("parse_assign_stmt", &pair);
-    let mut inner = pair.into_inner();
-    let lhs = parse_lhs_expr(inner.next().unwrap())?;
-    let expr = parse_expr(inner.next().unwrap())?;
-    Ok(AssignStmt { lhs, expr })
 }
 
 // expr_stmt = { (expr)? ~ ";" }
@@ -430,12 +399,18 @@ pub fn parse_block_stmt(pair: Pair<Rule>) -> ParseResult<Block> {
 }
 
 // if_stmt = { KW_IF ~ "(" ~ cond ~ ")" ~ stmt }
-pub fn parse_if_stmt(pair: Pair<Rule>) -> ParseResult<IfStmt> {
+pub fn parse_if_stmt(pair: Pair<Rule>) -> ParseResult<IfElseStmt> {
     _debug_rule("parse_if_stmt", &pair);
     let mut inner = pair.into_inner().skip(1);
     let cond = parse_expr(inner.next().unwrap())?;
     let stmt = parse_stmt(inner.next().unwrap())?;
-    Ok(IfStmt { cond, stmt })
+    Ok(IfElseStmt {
+        cond,
+        if_stmt: stmt,
+        else_if_conds: Vec::new(),
+        else_if_stmts: Vec::new(),
+        else_stmt: None,
+    })
 }
 
 // if_else_stmt = { KW_IF ~ "(" ~ cond ~ ")" ~ stmt ~ KW_ELSE ~ stmt }
@@ -445,11 +420,13 @@ pub fn parse_if_else_stmt(pair: Pair<Rule>) -> ParseResult<IfElseStmt> {
     let cond = parse_expr(inner.next().unwrap())?;
     let if_stmt = parse_stmt(inner.next().unwrap())?;
     let mut inner = inner.skip(1); // skip KW_ELSE
-    let else_stmt = parse_stmt(inner.next().unwrap())?;
+    let else_stmt = Some(parse_stmt(inner.next().unwrap())?);
     Ok(IfElseStmt {
         cond,
         if_stmt,
         else_stmt,
+        else_if_conds: Vec::new(),
+        else_if_stmts: Vec::new(),
     })
 }
 
@@ -459,7 +436,7 @@ pub fn parse_while_stmt(pair: Pair<Rule>) -> ParseResult<WhileStmt> {
     let mut inner = pair.into_inner().skip(1);
     let cond = parse_expr(inner.next().unwrap())?;
     let stmt = parse_stmt(inner.next().unwrap())?;
-    Ok(WhileStmt { cond, stmt })
+    Ok(WhileStmt { cond, body: stmt })
 }
 
 // for_stmt = { KW_FOR ~ "(" ~ (expr)? ~ ";" ~ (expr)? ~ ";" ~ (expr)? ~ ")" ~ stmt }
@@ -474,7 +451,7 @@ pub fn parse_for_stmt(pair: Pair<Rule>) -> ParseResult<ForStmt> {
         init,
         cond,
         update,
-        stmt,
+        body: stmt,
     })
 }
 
@@ -503,7 +480,7 @@ pub fn parse_continue_stmt(pair: Pair<Rule>) -> ParseResult<()> {
 }
 
 // return_stmt = { KW_RETURN ~ (expr)? ~ ";" }
-pub fn parse_return_stmt(pair: Pair<Rule>) -> ParseResult<Option<Box<Expr>>> {
+pub fn parse_return_stmt(pair: Pair<Rule>) -> ParseResult<ReturnStmt> {
     _debug_rule("parse_return_stmt", &pair);
     let inner = pair.into_inner();
     // skip KW_RETURN
@@ -512,14 +489,14 @@ pub fn parse_return_stmt(pair: Pair<Rule>) -> ParseResult<Option<Box<Expr>>> {
         .next()
         .map(|pair| parse_expr(pair))
         .transpose()?;
-    Ok(expr)
+    Ok(ReturnStmt { expr })
 }
 
 // expr = { prefix* ~ primary_expr ~ postfix* ~ (infix ~ prefix* ~ primary_expr ~ postfix* )* }
 pub fn parse_expr(pair: Pair<Rule>) -> ParseResult<Box<Expr>> {
     _debug_rule("parse_expr", &pair);
     let inner = pair.into_inner();
-    let expr = PRATT_PARSER
+    let expr = PRATT_PARSER_EXPR
         .map_primary(|x| Expr::Primary(parse_primary_expr(x).unwrap()))
         .map_infix(|lhs, op, rhs| {
             Expr::Infix(InfixExpr {
@@ -565,10 +542,6 @@ pub fn parse_primary_expr(pair: Pair<Rule>) -> ParseResult<PrimaryExpr> {
         Rule::call_expr => {
             let call_expr = parse_call_expr(inner)?;
             Ok(PrimaryExpr::Call(call_expr))
-        }
-        Rule::lhs_expr => {
-            let lhs = parse_lhs_expr(inner)?;
-            Ok(PrimaryExpr::Lhs(lhs))
         }
         Rule::id => {
             let id = parse_id(inner)?;
@@ -662,7 +635,7 @@ pub fn parse_prefix_op(pair: Pair<Rule>) -> ParseResult<PrefixOp> {
     Ok(op)
 }
 
-// infix = { infix_bitwise | infix_logic | infix_arith | infix_cmp}
+// infix = { infix_bitwise | infix_logic | infix_arith | infix_cmp | assign }
 pub fn parse_infix_op(pair: Pair<Rule>) -> ParseResult<InfixOp> {
     _debug_rule("parse_infix_op", &pair);
     let op = match pair.as_rule() {
@@ -684,6 +657,7 @@ pub fn parse_infix_op(pair: Pair<Rule>) -> ParseResult<InfixOp> {
         Rule::cmp_gt => InfixOp::Gt,
         Rule::cmp_le => InfixOp::Le,
         Rule::cmp_ge => InfixOp::Ge,
+        Rule::assign => InfixOp::Assign,
         _ => unreachable!(),
     };
     Ok(op)

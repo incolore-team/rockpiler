@@ -20,7 +20,7 @@ pub fn drive(args: Args) {
         trace!("syms: {}", syms.print_table());
         trace!("ast: {:?}", ast);
         trace!("================== SEMA+AST => Pre-SSA IR ==================");
-        let module = crate::ir_builder::build(&mut ast, &mut syms);
+        let module = crate::ir_builder::build(&mut ast, syms);
 
     }
 }

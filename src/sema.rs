@@ -74,18 +74,16 @@ impl ToSemaTrait for Stmt {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         match self {
             Stmt::VarDecls(var_decls) => var_decls.to_sema(symbol_table),
-            Stmt::Assign(assign_stmt) => assign_stmt.to_sema(symbol_table),
             Stmt::Expr(expr_stmt) => expr_stmt.to_sema(symbol_table),
             Stmt::Block(block) => block.to_sema(symbol_table),
-            Stmt::If(if_stmt) => if_stmt.to_sema(symbol_table),
             Stmt::IfElse(if_else_stmt) => if_else_stmt.to_sema(symbol_table),
             Stmt::While(while_stmt) => while_stmt.to_sema(symbol_table),
             Stmt::For(for_stmt) => for_stmt.to_sema(symbol_table),
             Stmt::Break => {}
             Stmt::DoWhile(do_while_stmt) => do_while_stmt.to_sema(symbol_table),
             Stmt::Continue => {}
-            Stmt::Return(expr_option) => {
-                if let Some(expr) = expr_option {
+            Stmt::Return(return_stmt) => {
+                if let Some(expr) = &mut return_stmt.expr {
                     expr.to_sema(symbol_table);
                 }
             }
@@ -154,7 +152,6 @@ impl ToSemaTrait for PrimaryExpr {
         match self {
             PrimaryExpr::Group(expr) => expr.to_sema(symbol_table),
             PrimaryExpr::Call(call_expr) => call_expr.to_sema(symbol_table),
-            PrimaryExpr::Lhs(lhs_expr) => lhs_expr.to_sema(symbol_table),
             PrimaryExpr::Ident(ident_expr) => ident_expr.to_sema(symbol_table),
             PrimaryExpr::Literal(literal) => literal.to_sema(symbol_table),
         }
@@ -193,12 +190,6 @@ impl ToSemaTrait for VarDecls {
     }
 }
 
-impl ToSemaTrait for AssignStmt {
-    fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
-        self.lhs.to_sema(symbol_table);
-        self.expr.to_sema(symbol_table);
-    }
-}
 
 impl ToSemaTrait for ExprStmt {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
@@ -208,25 +199,21 @@ impl ToSemaTrait for ExprStmt {
     }
 }
 
-impl ToSemaTrait for IfStmt {
-    fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
-        self.cond.to_sema(symbol_table);
-        self.stmt.to_sema(symbol_table);
-    }
-}
 
 impl ToSemaTrait for IfElseStmt {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.cond.to_sema(symbol_table);
         self.if_stmt.to_sema(symbol_table);
-        self.else_stmt.to_sema(symbol_table);
+        if let Some(else_stmt) = &mut self.else_stmt {
+            else_stmt.to_sema(symbol_table);
+        }
     }
 }
 
 impl ToSemaTrait for WhileStmt {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.cond.to_sema(symbol_table);
-        self.stmt.to_sema(symbol_table);
+        self.body.to_sema(symbol_table);
     }
 }
 
@@ -241,7 +228,7 @@ impl ToSemaTrait for ForStmt {
         if let Some(update) = &mut self.update {
             update.to_sema(symbol_table);
         }
-        self.stmt.to_sema(symbol_table);
+        self.body.to_sema(symbol_table);
     }
 }
 
@@ -249,38 +236,5 @@ impl ToSemaTrait for DoWhileStmt {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.stmt.to_sema(symbol_table);
         self.cond.to_sema(symbol_table);
-    }
-}
-
-impl ToSemaTrait for LhsExpr {
-    fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
-        match self {
-            LhsExpr::MixedAccess(ma) => {
-                let MixedAccess {
-                    id,
-                    access,
-                    sema_ref: _,
-                } = ma;
-                let symbol = symbol_table.lookup_symbol(id);
-                if symbol.is_none() {
-                    panic!("Undefined identifier: {}", id);
-                }
-                ma.sema_ref = Some(SemaRef::new(symbol.unwrap(), symbol_table.scope_id()));
-                for access_item in access {
-                    access_item.to_sema(symbol_table);
-                }
-            }
-        }
-    }
-}
-
-impl ToSemaTrait for LhsAccess {
-    fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
-        match self {
-            LhsAccess::Index(expr) => expr.to_sema(symbol_table),
-            LhsAccess::Dot(_field_name) => {
-                // 目前没有这样的feature，还不支持结构体
-            }
-        }
     }
 }

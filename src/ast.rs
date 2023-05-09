@@ -36,6 +36,7 @@ pub enum InfixOp {
     Gt,
     Le,
     Ge,
+    Assign,
 }
 #[derive(Debug, PartialEq, Clone)]
 pub enum PostfixOp {
@@ -116,24 +117,6 @@ impl Param {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum LhsExpr {
-    MixedAccess(MixedAccess),
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct MixedAccess {
-    pub id: String,
-    pub access: Vec<LhsAccess>,
-    pub sema_ref: Option<SemaRef>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum LhsAccess {
-    Index(Box<Expr>),
-    Dot(DotAccess),
-}
-
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Block {
@@ -142,53 +125,49 @@ pub struct Block {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
     VarDecls(VarDecls),
-    Assign(AssignStmt),
     Expr(ExprStmt),
     Block(Block),
-    If(IfStmt),
     IfElse(IfElseStmt),
     While(WhileStmt),
     For(ForStmt),
     Break,
     DoWhile(DoWhileStmt),
     Continue,
-    Return(Option<Box<Expr>>),
+    Return(ReturnStmt),
 }
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ReturnStmt {
+    pub expr: Option<Box<Expr>>,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct VarDecls {
     pub decls: Vec<VarDecl>,
-}
-#[derive(Debug, PartialEq, Clone)]
-pub struct AssignStmt {
-    pub lhs: LhsExpr,
-    pub expr: Box<Expr>,
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct ExprStmt {
     pub expr: Option<Box<Expr>>,
 }
 #[derive(Debug, PartialEq, Clone)]
-pub struct IfStmt {
-    pub cond: Box<Expr>,
-    pub stmt: Box<Stmt>,
-}
-#[derive(Debug, PartialEq, Clone)]
 pub struct IfElseStmt {
     pub cond: Box<Expr>,
     pub if_stmt: Box<Stmt>,
-    pub else_stmt: Box<Stmt>,
+    pub else_if_conds: Vec<Box<Expr>>,
+    pub else_if_stmts: Vec<Box<Stmt>>,
+    pub else_stmt: Option<Box<Stmt>>,
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct WhileStmt {
     pub cond: Box<Expr>,
-    pub stmt: Box<Stmt>,
+    pub body: Box<Stmt>,
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct ForStmt {
     pub init: Option<Box<Expr>>,
     pub cond: Option<Box<Expr>>,
     pub update: Option<Box<Expr>>,
-    pub stmt: Box<Stmt>,
+    pub body: Box<Stmt>,
 }
 #[derive(Debug, PartialEq, Clone)]
 
@@ -200,7 +179,7 @@ pub struct DoWhileStmt {
 #[derive(Debug, PartialEq, Clone)]
 pub enum InitVal {
     Expr(Box<Expr>),
-    ArrayInitVal(ArrayInitVal),
+    Array(ArrayInitVal),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -220,7 +199,6 @@ pub enum Expr {
 pub enum PrimaryExpr {
     Group(Box<Expr>),
     Call(CallExpr),
-    Lhs(LhsExpr),
     Ident(IdentExpr),
     Literal(Literal),
 }
@@ -307,6 +285,38 @@ pub enum BuiltinType {
     Float,
     Double,
 }
+
+impl Into<Type> for BuiltinType {
+    fn into(self) -> Type {
+        Type::Builtin(self)
+    }
+}
+
+impl Into<Type> for PointerType {
+    fn into(self) -> Type {
+        Type::Pointer(self)
+    }
+}
+
+impl Into<Type> for ArrayType {
+    fn into(self) -> Type {
+        Type::Array(self)
+    }
+}
+
+impl Into<Type> for RecordType {
+    fn into(self) -> Type {
+        Type::Record(self)
+    }
+}
+
+impl Into<Type> for FunctionType {
+    fn into(self) -> Type {
+        Type::Function(self)
+    }
+}
+
+
 impl Type {
     pub fn is_arithmetic(&self) -> bool {
         match self {
@@ -321,6 +331,7 @@ impl Type {
             Type::Pointer(_) | Type::Array(_) | Type::Record(_) | Type::Function(_) => false,
         }
     }
+
 }
 
 impl BuiltinType {
@@ -334,6 +345,7 @@ impl BuiltinType {
     pub fn is_integer(&self) -> bool {
         matches!(
             self,
+            BuiltinType::Bool |
             BuiltinType::UChar | BuiltinType::Char | BuiltinType::UShort |
             BuiltinType::Short | BuiltinType::UInt | BuiltinType::Int |
             BuiltinType::UInt64 | BuiltinType::Int64
@@ -419,4 +431,50 @@ pub struct FunctionType {
     pub param_types: Vec<Box<Type>>,
     pub param_count: usize,
     pub is_variadic: bool,
+}
+impl Type {
+    // ...
+
+    pub fn can_assign_from(&self, other_type: &Type) -> bool {
+        match (self, other_type) {
+            // Builtin types can be assigned from compatible Builtin types
+            (Type::Builtin(builtin_self), Type::Builtin(builtin_other)) => {
+                builtin_self == builtin_other
+            }
+            // Pointer types can be assigned from compatible Pointer types
+            (Type::Pointer(pointer_self), Type::Pointer(pointer_other)) => {
+                pointer_self.type_.can_assign_from(&*pointer_other.type_)
+            }
+            // Array types can be assigned from compatible Array types
+            (Type::Array(array_self), Type::Array(array_other)) => {
+                match (array_self, array_other) {
+                    (ArrayType::Constant(const_self), ArrayType::Constant(const_other)) => {
+                        const_self.element_type.can_assign_from(&*const_other.element_type)
+                            && const_self.size == const_other.size
+                    }
+                    (ArrayType::Incomplete(inc_self), ArrayType::Incomplete(inc_other)) => {
+                        inc_self.element_type.can_assign_from(&*inc_other.element_type)
+                    }
+                    _ => false,
+                }
+            }
+            // Record types can be assigned from compatible Record types
+            (Type::Record(record_self), Type::Record(record_other)) => {
+                record_self.tag_type == record_other.tag_type
+            }
+            // Function types can be assigned from compatible Function types
+            (Type::Function(func_self), Type::Function(func_other)) => {
+                func_self.return_type.can_assign_from(&*func_other.return_type)
+                    && func_self.param_count == func_other.param_count
+                    && func_self
+                        .param_types
+                        .iter()
+                        .zip(func_other.param_types.iter())
+                        .all(|(param_self, param_other)| param_self.can_assign_from(&**param_other))
+                    && func_self.is_variadic == func_other.is_variadic
+            }
+            // All other combinations are not assignable
+            _ => false,
+        }
+    }
 }
