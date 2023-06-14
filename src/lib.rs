@@ -12,3 +12,4 @@ pub mod symbol;
 pub mod ir;
 pub mod sema;
 pub mod ir_builder;
+pub mod infer_eval;

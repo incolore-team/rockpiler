@@ -14,6 +14,12 @@ type ScopeArena = Arena<Scope>;
 pub type SymbolId = Id<Symbol>;
 pub type ScopeId = Id<Scope>;
 
+pub struct SymbolTable {
+    pub symbols: SymbolArena,
+    pub scopes: ScopeArena,
+    current_scope: ScopeId,
+}
+
 impl Scope {
     // 创建一个新的作用域
     pub fn new(parent: Option<ScopeId>) -> Self {
@@ -42,11 +48,6 @@ impl Scope {
     }
 }
 
-pub struct SymbolTable {
-    symbol_arena: SymbolArena,
-    scope_arena: ScopeArena,
-    current_scope: ScopeId,
-}
 
 impl SymbolTable {
     // 创建一个新的符号表
@@ -54,16 +55,16 @@ impl SymbolTable {
         let mut scope_arena = ScopeArena::new();
         let root_scope = scope_arena.alloc(Scope::new(None));
         SymbolTable {
-            symbol_arena: SymbolArena::new(),
-            scope_arena,
+            symbols: SymbolArena::new(),
+            scopes: scope_arena,
             current_scope: root_scope,
         }
     }
 
     // 进入一个新的作用域
     pub fn enter_scope(&mut self) {
-        let new_scope = self.scope_arena.alloc(Scope::new(Some(self.current_scope)));
-        self.scope_arena[self.current_scope]
+        let new_scope = self.scopes.alloc(Scope::new(Some(self.current_scope)));
+        self.scopes[self.current_scope]
             .children
             .push(new_scope);
         self.current_scope = new_scope;
@@ -71,21 +72,33 @@ impl SymbolTable {
 
     // 离开当前作用域，返回到父作用域
     pub fn leave_scope(&mut self) {
-        if let Some(parent_id) = self.scope_arena[self.current_scope].parent {
+        if let Some(parent_id) = self.scopes[self.current_scope].parent {
             self.current_scope = parent_id;
         }
     }
 
     // 在当前作用域中插入一个符号
     pub fn insert_symbol(&mut self, name: String, symbol: Symbol) -> SymbolId {
-        let symbol_id = self.symbol_arena.alloc(symbol);
-        self.scope_arena[self.current_scope].insert(name, symbol_id);
+        let symbol_id = self.symbols.alloc(symbol);
+        self.scopes[self.current_scope].insert(name, symbol_id);
         symbol_id
     }
 
     // 查找一个符号
     pub fn lookup_symbol(&self, name: &str) -> Option<SymbolId> {
-        self.scope_arena[self.current_scope].lookup(name, &self.scope_arena)
+        self.scopes[self.current_scope].lookup(name, &self.scopes)
+    }
+
+    pub fn resolve_symbol(&self, name: &str) -> Option<Symbol> {
+        if let Some(symbol_id) = self.lookup_symbol(name) {
+            Some(self.symbols[symbol_id].clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn resolve_symbol_by_id(&self, symbol_id: SymbolId) -> Option<Symbol> {
+        Some(self.symbols[symbol_id].clone())
     }
 
     // 打印符号表，并返回字符串
@@ -100,9 +113,9 @@ impl SymbolTable {
     // 打印作用域，并返回字符串
     fn print_scope(&self, scope_id: ScopeId, level: usize) -> String {
         let mut result = String::new();
-        let scope = &self.scope_arena[scope_id];
+        let scope = &self.scopes[scope_id];
         for (name, symbol_id) in &scope.symbols {
-            let symbol = &self.symbol_arena[*symbol_id];
+            let symbol = &self.symbols[*symbol_id];
             result += &format!("{:indent$}{}: {:?}\n", "", name, symbol, indent = level * 4);
         }
         for child_id in &scope.children {
@@ -124,8 +137,8 @@ impl fmt::Debug for Scope {
 
 impl fmt::Debug for SymbolTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Symbol Arena: {:?}", self.symbol_arena)?;
-        writeln!(f, "Scope Arena: {:?}", self.scope_arena)?;
+        writeln!(f, "Symbol Arena: {:?}", self.symbols)?;
+        writeln!(f, "Scope Arena: {:?}", self.scopes)?;
         writeln!(f, "Current Scope: {:?}", self.current_scope)
     }
 }

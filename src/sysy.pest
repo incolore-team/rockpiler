@@ -24,8 +24,7 @@ const_expr = { expr }
 block_item = { var_decls | stmt }
 
 stmt = {
-    assign_stmt
-    | expr_stmt
+    expr_stmt
     | block_stmt
     | if_else_stmt
     | if_stmt
@@ -37,7 +36,6 @@ stmt = {
     | return_stmt
 }
 
-    assign_stmt = { lhs_expr ~ "=" ~ expr ~ ";" }
     expr_stmt = { (expr)? ~ ";" }
     block_stmt = { block }
     if_stmt = { KW_IF ~ "(" ~ cond ~ ")" ~ stmt }
@@ -59,7 +57,8 @@ prefix_op = _{ prefix_incr | prefix_decr | prefix_not | prefix_bit_not | prefix_
     prefix_pos = { "+" }
     prefix_neg = { "-" }
 
-infix_op = _{ infix_logic | infix_cmp | infix_bitwise | infix_arith }
+infix_op = _{ infix_logic | infix_cmp | infix_bitwise | infix_arith | assign }
+    assign = { "=" }
     infix_bitwise = _{ bit_and | bit_or | bit_xor | bit_shl | bit_shr }
         bit_and = { "&" }
         bit_or = { "|" }
