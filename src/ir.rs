@@ -98,6 +98,10 @@ impl Value {
         }
     }
 
+    pub fn resolve(id: ValueId, module: &Module) -> &Value {
+        &module.values[id]
+    }
+
     pub fn ty(&self) -> Type {
         match self {
             Value::GlobalVariable(gv) => gv.ty.clone(),
@@ -136,6 +140,13 @@ impl FunctionValue {
             is_var_arg,
         }
     }
+
+    pub fn resolve_param(param_value_id: ValueId, module: &Module) -> &ParameterValue {
+        match &module.values[param_value_id] {
+            Value::ParameterValue(p) => p,
+            _ => panic!("expect a parameter"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -157,10 +168,7 @@ impl BasicBlockList {
     }
 }
 
-impl FunctionValue {
-    // AI 可以自行增加方法，例如获取某个 bb、获取入口 bb 等
-    // 对于其它结构体，也可以自行增加方法，这里不赘述
-}
+impl FunctionValue {}
 
 #[derive(Debug, Clone, Default)]
 pub struct BasicBlockValue {
@@ -175,6 +183,13 @@ impl BasicBlockValue {
             name,
             insts: LinkedList::new(),
             terminator: None,
+        }
+    }
+
+    pub fn resolve_inst(inst_value_id: ValueId, module: &Module) -> &InstValue {
+        match &module.values[inst_value_id] {
+            Value::Instruction(inst) => inst,
+            _ => panic!("expect an instruction"),
         }
     }
 }

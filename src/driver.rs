@@ -1,6 +1,6 @@
-use log::{trace};
+use log::trace;
 
-use crate::{cli::Args, scope::SymbolTable, sema::ToSemaTrait};
+use crate::{cli::Args, ir_printer, scope::SymbolTable, sema::ToSemaTrait};
 
 pub fn drive(args: Args) {
     assert!(args.inputs.len() > 0);
@@ -20,7 +20,7 @@ pub fn drive(args: Args) {
         trace!("syms: {}", syms.print_table());
         trace!("ast: {:?}", ast);
         trace!("================== SEMA+AST => Pre-SSA IR ==================");
-        let _ = crate::ir_builder::build(&mut ast, syms);
-
+        let module = crate::ir_builder::build(&mut ast, syms);
+        ir_printer::print(&module);
     }
 }
