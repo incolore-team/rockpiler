@@ -1,6 +1,9 @@
 use std::collections::{HashMap, LinkedList};
 
-use crate::{ast::*, scope::{SymbolId, SymbolTable}};
+use crate::{
+    ast::*,
+    scope::{SymbolId, SymbolTable},
+};
 use id_arena::Arena;
 use linked_hash_map::LinkedHashMap;
 
@@ -21,7 +24,7 @@ pub struct Module {
     pub types: Arena<Type>,
 
     pub global_variables: LinkedHashMap<String, ValueId>,
-    pub syms:  SymbolTable,
+    pub syms: SymbolTable,
     pub sym2def: LinkedHashMap<SymbolId, ValueId>,
     pub functions: LinkedHashMap<String, ValueId>,
     pub builtins: LinkedHashMap<String, ValueId>,
@@ -32,8 +35,8 @@ pub struct Module {
 }
 
 impl Module {
-    pub fn new (syms: SymbolTable) -> Self {
-        let mut module = Module {
+    pub fn new(syms: SymbolTable) -> Self {
+        let module = Module {
             values: Arena::new(),
             types: Arena::new(),
             global_variables: LinkedHashMap::new(),
@@ -99,7 +102,7 @@ impl Value {
         match self {
             Value::GlobalVariable(gv) => gv.ty.clone(),
             Value::Function(f) => f.ret_ty.clone(),
-            Value::BasicBlock(bb) => Type::Builtin(BuiltinType::Void),
+            Value::BasicBlock(_) => Type::Builtin(BuiltinType::Void),
             Value::Instruction(inst) => inst.ty(),
             Value::Const(c) => c.ty(),
             Value::ParameterValue(p) => p.ty.clone(),
@@ -133,7 +136,6 @@ impl FunctionValue {
             is_var_arg,
         }
     }
-
 }
 
 #[derive(Debug, Clone, Default)]
@@ -167,6 +169,16 @@ pub struct BasicBlockValue {
     pub terminator: Option<ValueId>,
 }
 
+impl BasicBlockValue {
+    pub fn new(name: String) -> Self {
+        BasicBlockValue {
+            name,
+            insts: LinkedList::new(),
+            terminator: None,
+        }
+    }
+}
+
 /// 在 LLVM 叫 Argument
 #[derive(Debug, Clone)]
 pub struct ParameterValue {
@@ -186,7 +198,7 @@ pub enum InstValue {
     Return(ReturnInst),
     Call(CallInst),
     Phi(PhiInst),
-    Cast        (CastInst)
+    Cast(CastInst),
 }
 
 impl InstValue {
@@ -194,12 +206,12 @@ impl InstValue {
         match self {
             InstValue::InfixOp(op) => op.ty.clone(),
             InstValue::Load(inst) => inst.ty.clone(),
-            InstValue::Store(inst) => BuiltinType::Void.into(),
+            InstValue::Store(_) => BuiltinType::Void.into(),
             InstValue::Alloca(inst) => inst.ty.clone(),
-            InstValue::Branch(inst) => BuiltinType::Void.into(),
-            InstValue::Jump(inst) => BuiltinType::Void.into(),
+            InstValue::Branch(_) => BuiltinType::Void.into(),
+            InstValue::Jump(_) => BuiltinType::Void.into(),
             InstValue::Gep(inst) => inst.ty.clone(),
-            InstValue::Return(inst) => BuiltinType::Void.into(),
+            InstValue::Return(_) => BuiltinType::Void.into(),
             InstValue::Call(inst) => inst.ty.clone(),
             InstValue::Phi(inst) => inst.ty.clone(),
             InstValue::Cast(inst) => inst.new_ty.clone(),
@@ -230,29 +242,27 @@ impl ConstValue {
         }
     }
 
-    pub fn zeroOf(ty: Type) -> Self {
+    pub fn zero_of(ty: Type) -> Self {
         match ty {
-            Type::Builtin(builtin_ty) => {
-                match builtin_ty {
-                    BuiltinType::Int => ConstValue::Int(ConstInt {
-                        ty: BuiltinType::Int.into(),
-                        value: 0,
-                    }),
-                    BuiltinType::Float => ConstValue::Float(ConstFloat {
-                        ty: BuiltinType::Float.into(),
-                        value: 0.0,
-                    }),
-                    BuiltinType::Void => todo!(),
-                    BuiltinType::Bool => todo!(),
-                    BuiltinType::UChar => todo!(),
-                    BuiltinType::Char => todo!(),
-                    BuiltinType::UShort => todo!(),
-                    BuiltinType::Short => todo!(),
-                    BuiltinType::UInt => todo!(),
-                    BuiltinType::UInt64 => todo!(),
-                    BuiltinType::Int64 => todo!(),
-                    BuiltinType::Double => todo!(),
-                }
+            Type::Builtin(builtin_ty) => match builtin_ty {
+                BuiltinType::Int => ConstValue::Int(ConstInt {
+                    ty: BuiltinType::Int.into(),
+                    value: 0,
+                }),
+                BuiltinType::Float => ConstValue::Float(ConstFloat {
+                    ty: BuiltinType::Float.into(),
+                    value: 0.0,
+                }),
+                BuiltinType::Void => todo!(),
+                BuiltinType::Bool => todo!(),
+                BuiltinType::UChar => todo!(),
+                BuiltinType::Char => todo!(),
+                BuiltinType::UShort => todo!(),
+                BuiltinType::Short => todo!(),
+                BuiltinType::UInt => todo!(),
+                BuiltinType::UInt64 => todo!(),
+                BuiltinType::Int64 => todo!(),
+                BuiltinType::Double => todo!(),
             },
             Type::Pointer(pointee_ty) => ConstValue::Int(ConstInt {
                 ty: Type::Pointer(pointee_ty),
@@ -449,7 +459,6 @@ impl Into<Value> for ReturnInst {
         Value::Instruction(InstValue::Return(self))
     }
 }
-
 
 pub enum TermInst {
     Jump(JumpInst),

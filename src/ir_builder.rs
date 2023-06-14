@@ -1,7 +1,3 @@
-use std::{any::Any, clone};
-
-use linked_hash_map::LinkedHashMap;
-
 use crate::{ast::*, ir::*, scope::*};
 
 pub fn build(ast: &mut TransUnit, syms: SymbolTable) -> Module {
@@ -78,6 +74,14 @@ impl Builder {
 
         let is_var_arg = false;
         let mut cur_func = FunctionValue::new(name, params, ret_ty, is_var_arg);
+        let entry_bb = BasicBlockValue::new("entry".to_string());
+
+        let entry_bb_id = self.module.values.alloc(Value::BasicBlock(entry_bb));
+        cur_func
+            .bbs
+            .append_with_name(entry_bb_id, "entry".to_string());
+
+        self.cur_bb = Some(entry_bb_id);
 
         let function_id = self.module.values.alloc(Value::Function(cur_func));
         self.module
@@ -86,7 +90,6 @@ impl Builder {
 
         self.cur_func = Some(function_id);
 
-        let mut cur_bb = self.build_basic_block();
         for stmt in &func_decl.body.stmts {
             self.build_statement(stmt);
         }
@@ -117,7 +120,7 @@ impl Builder {
         match init_val {
             InitVal::Expr(expr) => self.build_expr(expr),
             InitVal::Array(array_init_val) => {
-                let ty = Type::Array(ArrayType::Constant(ConstantArrayType {
+                let _ty = Type::Array(ArrayType::Constant(ConstantArrayType {
                     element_type: Box::new(type_.clone()), // Replace with the correct element type
                     size: array_init_val.0.len() as i64,
                     size_info: None,
@@ -196,7 +199,7 @@ impl Builder {
     }
      */
     pub fn build_while_statement(&mut self, while_stmt: &WhileStmt) {
-        let mut cond_bb = self.build_basic_block();
+        let cond_bb = self.build_basic_block();
         let body_bb = self.build_basic_block();
         let end_bb = self.build_basic_block();
 
@@ -283,7 +286,7 @@ impl Builder {
     pub fn build_for_statement(&mut self, for_stmt: &ForStmt) {
         let init_value = for_stmt.init.as_ref().map(|init| self.build_expr(init));
 
-        let mut cond_bb = self.build_basic_block();
+        let cond_bb = self.build_basic_block();
         let body_bb = self.build_basic_block();
         let end_bb = self.build_basic_block();
 
@@ -352,7 +355,7 @@ impl Builder {
                     PrefixOp::Decr => InfixOp::Sub,
                     _ => todo!(),
                 };
-                let zero = ConstValue::zeroOf(prefix_expr.infer_ty.as_ref().unwrap().clone());
+                let zero = ConstValue::zero_of(prefix_expr.infer_ty.as_ref().unwrap().clone());
                 let zero_id = self.module.values.alloc(zero.into());
                 let bin_op = BinaryOperator {
                     ty: prefix_expr.infer_ty.as_ref().unwrap().clone(),
@@ -363,8 +366,8 @@ impl Builder {
                 self.module.values.alloc(bin_op.into())
             }
             Expr::Postfix(postfix_expr) => {
-                let lhs = self.build_expr(&postfix_expr.lhs);
-                let op = match postfix_expr.op {
+                let _lhs = self.build_expr(&postfix_expr.lhs);
+                let _op = match postfix_expr.op {
                     PostfixOp::Incr => InfixOp::Add,
                     PostfixOp::Decr => InfixOp::Sub,
                     PostfixOp::CallAccess(_) => {
@@ -404,7 +407,7 @@ impl Builder {
                     为了区分不同作用域中的相同名称的变量，可以在构建 IR 时为每个作用域的变量创建不同的名称。
                      */
                     let sym_id = ident_expr.sema_ref.as_ref().unwrap().symbol_id;
-                    let symbol = self.module.syms.resolve_symbol_by_id(sym_id);
+                    let _symbol = self.module.syms.resolve_symbol_by_id(sym_id);
                     let var_val_id = self.module.sym2def.get(&sym_id).unwrap().clone();
                     var_val_id
                 }
@@ -436,7 +439,7 @@ impl Builder {
                 };
                 self.module.values.alloc(bool_value.into())
             }
-            Literal::String(string) => {
+            Literal::String(_string) => {
                 todo!("build string literal")
             }
             Literal::Char(_) => todo!(),

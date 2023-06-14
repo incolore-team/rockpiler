@@ -1,8 +1,8 @@
-use std::fmt::Pointer;
+
 
 use crate::scope::SymbolTable;
 use crate::symbol::Symbol;
-use crate::{ast::*, sema::SemaRef};
+use crate::{ast::*};
 
 pub trait InferEvaluator {
     fn infer_type(&self, syms: &SymbolTable) -> Option<Type>;
@@ -50,7 +50,7 @@ impl InferEvaluator for PrimaryExpr {
 }
 
 impl Literal {
-    fn infer_type(&self, syms: &SymbolTable) -> Type {
+    fn infer_type(&self, _: &SymbolTable) -> Type {
         match self {
             Literal::Int(_) => Type::Builtin(BuiltinType::Int),
             Literal::Char(_) => Type::Builtin(BuiltinType::Char),
@@ -199,7 +199,7 @@ impl InferEvaluator for PostfixExpr {
         }
     }
 
-    fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal> {
+    fn eval_literal(&self, _: &SymbolTable) -> Option<Literal> {
         todo!()
     }
 }
@@ -209,7 +209,7 @@ impl PostfixExpr {
         Some(lhs_type.clone())
     }
 
-    fn infer_type_call_access(&self, lhs_type: &Type, call: &CallAccess) -> Option<Type> {
+    fn infer_type_call_access(&self, _lhs_type: &Type, _call: &CallAccess) -> Option<Type> {
         // 如果左值表达式为函数名，则返回函数返回值类型
         // if let Expr::Primary(PrimaryExpr::Ident(IdentExpr { id, .. })) = &*self.lhs {
         //     if let Some(SemaRef::Function(func)) = self.resolve(id) {
@@ -236,11 +236,11 @@ impl PostfixExpr {
         todo!()
     }
 
-    fn infer_type_dot_access(&self, lhs_type: &Type, dot: &DotAccess) -> Option<Type> {
+    fn infer_type_dot_access(&self, _lhs_type: &Type, _dot: &DotAccess) -> Option<Type> {
         unimplemented!()
     }
 
-    fn infer_type_index_access(&self, lhs_type: &Type, index: &Box<Expr>) -> Option<Type> {
+    fn infer_type_index_access(&self, _lhs_type: &Type, _index: &Box<Expr>) -> Option<Type> {
         unimplemented!()
     }
     
@@ -252,13 +252,13 @@ impl PostfixExpr {
         match &self.op {
             PostfixOp::Incr => lhs_val.add(&Literal::Int(1)),
             PostfixOp::Decr => lhs_val.sub(&Literal::Int(1)),
-            PostfixOp::CallAccess(call) => {
+            PostfixOp::CallAccess(_call) => {
                 unreachable!()
             }
-            PostfixOp::DotAccess(dot) => {
+            PostfixOp::DotAccess(_dot) => {
                 unreachable!()
             }
-            PostfixOp::IndexAccess(IndexAccess { index }) => {
+            PostfixOp::IndexAccess(IndexAccess { index: _ }) => {
                 unreachable!()
             }
         }
@@ -289,7 +289,7 @@ impl InferEvaluator for CallExpr {
         }
     }
 
-    fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal> {
+    fn eval_literal(&self, _syms: &SymbolTable) -> Option<Literal> {
         // 如果调用的是内置函数，则直接调用对应的函数
         // if let Some(func) = get_builtin_function(&self.id) {
         //     let mut args = Vec::new();
@@ -332,14 +332,14 @@ impl InferEvaluator for InitVal{
     fn infer_type(&self, syms: &SymbolTable) -> Option<Type> {
         match self {
             InitVal::Expr(expr) => expr.infer_type(syms),
-            InitVal::Array(array) => None,
+            InitVal::Array(_array) => None,
         }
     }
 
     fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal> {
         match self {
             InitVal::Expr(expr) => expr.eval_literal(syms),
-            InitVal::Array(array) => None,
+            InitVal::Array(_array) => None,
         }
     }
 }
@@ -362,7 +362,7 @@ impl InferEvaluator for InitVal{
 // }
 
 impl InferEvaluator for Literal {
-    fn infer_type(&self, syms: &SymbolTable) -> Option<Type> {
+    fn infer_type(&self, _syms: &SymbolTable) -> Option<Type> {
         Some(match self {
             Literal::Bool(_) => Type::Builtin(BuiltinType::Bool),
             Literal::Char(_) => Type::Builtin(BuiltinType::Char),
@@ -371,11 +371,10 @@ impl InferEvaluator for Literal {
             Literal::String(_) => Type::Pointer(
                 PointerType { type_: Box::new(Type::Builtin(BuiltinType::Char)) }
             ),
-            Literal::Char(_) => Type::Builtin(BuiltinType::Char),
         })
     }
 
-    fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal> {
+    fn eval_literal(&self, _syms: &SymbolTable) -> Option<Literal> {
         Some(self.clone())
     }
 }
