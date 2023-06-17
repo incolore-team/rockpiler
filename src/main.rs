@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use log::debug;
+use log::*;
 use rockc::{cli::Args, driver};
 
 fn main() -> ExitCode {
@@ -19,11 +19,17 @@ fn test_all() {
     use std::fs;
 
     let dir = "./tests/functional/";
-    let entries = fs::read_dir(dir).unwrap();
+    // let entries = fs::read_dir(dir).unwrap();
+    let mut entries = fs::read_dir(dir)
+        .unwrap()
+        .map(|res| res.map(|e| e.path()).unwrap())
+        .collect::<Vec<_>>();
 
-    for entry in entries {
-        let entry = entry.unwrap();
-        let path = entry.path();
+    entries.sort();
+
+    for path in entries {
+        // let entry = entry.unwrap();
+        // let path = entry.path();
         if !path.is_file() {
             continue;
         }
@@ -35,6 +41,7 @@ fn test_all() {
             },
             None => continue
         }
+        info!("{}", path.to_str().unwrap());
         let file_stem = path.file_stem().unwrap().to_str().unwrap();
         let output_path = format!("{}{}.ll", dir, file_stem);
         let input_path = format!("{}{}.sy", dir, file_stem);

@@ -157,10 +157,18 @@ impl Builder {
             Stmt::Expr(expr_stmt) => {
                 self.build_expression_statement(expr_stmt);
             }
+            Stmt::VarDecls(var_decls_stmt) => {
+                self.build_var_decls_statement(var_decls_stmt);
+            }
             _ => {
+                panic!("{:?}", stmt);
                 todo!()
             }
         }
+    }
+
+    pub fn build_var_decls_statement(&mut self, var_decls_stmt: &VarDecls) {
+        todo!()
     }
 
     pub fn build_if_statement(&mut self, if_stmt: &IfElseStmt) {
