@@ -328,6 +328,7 @@ impl Into<Value> for ConstArray {
 #[derive(Debug, Clone)]
 pub struct AllocaInst {
     pub ty: Type,
+    pub name: String,
 }
 
 impl Into<Value> for AllocaInst {

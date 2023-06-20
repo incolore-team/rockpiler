@@ -48,7 +48,6 @@ impl Scope {
     }
 }
 
-
 impl SymbolTable {
     // 创建一个新的符号表
     pub fn new() -> Self {
@@ -64,9 +63,7 @@ impl SymbolTable {
     // 进入一个新的作用域
     pub fn enter_scope(&mut self) {
         let new_scope = self.scopes.alloc(Scope::new(Some(self.current_scope)));
-        self.scopes[self.current_scope]
-            .children
-            .push(new_scope);
+        self.scopes[self.current_scope].children.push(new_scope);
         self.current_scope = new_scope;
     }
 

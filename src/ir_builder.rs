@@ -45,12 +45,12 @@ impl Builder {
     }
 
     pub fn build_module(&mut self, ast: &mut TransUnit) {
-        for func_decl in &ast.func_decls {
-            self.build_function(func_decl);
-        }
-
         for var_decl in &ast.var_decls {
             self.build_global_variable(var_decl);
+        }
+
+        for func_decl in &ast.func_decls {
+            self.build_function(func_decl);
         }
     }
 
@@ -115,6 +115,9 @@ impl Builder {
 
         let global_var_id = self.module.values.alloc(Value::GlobalVariable(global_var));
         self.module.global_variables.insert(name, global_var_id);
+        self.module
+            .sym2def
+            .insert(var_decl.sema_ref.as_ref().unwrap().symbol_id, global_var_id);
     }
     pub fn build_init_val(&mut self, init_val: &InitVal, type_: &Type) -> ValueId {
         match init_val {
@@ -168,7 +171,29 @@ impl Builder {
     }
 
     pub fn build_var_decls_statement(&mut self, var_decls_stmt: &VarDecls) {
-        todo!()
+        for decl in &var_decls_stmt.decls {
+            let alloca = AllocaInst {
+                ty: self.build_type(&decl.type_),
+                name: decl.name.clone(),
+            };
+            let alloca_id = self.module.values.alloc(alloca.into());
+            self.cur_bb_mut().insts.push_back(alloca_id);
+            self.module
+                .sym2def
+                .insert(decl.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
+            match &decl.init {
+                Some(init_val) => {
+                    let init_val_id = self.build_init_val(init_val, &decl.type_);
+                    let store_inst = StoreInst {
+                        src: init_val_id,
+                        dst: alloca_id,
+                    };
+                    let store_id = self.module.values.alloc(store_inst.into());
+                    self.cur_bb_mut().insts.push_back(store_id);
+                }
+                None => todo!(),
+            }
+        }
     }
 
     pub fn build_if_statement(&mut self, if_stmt: &IfElseStmt) {
@@ -416,6 +441,8 @@ impl Builder {
                      */
                     let sym_id = ident_expr.sema_ref.as_ref().unwrap().symbol_id;
                     let _symbol = self.module.syms.resolve_symbol_by_id(sym_id);
+                    // log::debug!("sym_id: {:?}, _symbol: {:?}", sym_id, _symbol);
+                    // log::debug!("sym2def: {:?}", self.module.sym2def);
                     let var_val_id = self.module.sym2def.get(&sym_id).unwrap().clone();
                     var_val_id
                 }

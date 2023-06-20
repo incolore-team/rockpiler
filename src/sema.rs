@@ -1,4 +1,4 @@
-use crate::{ast::*, scope::*, symbol::*};
+use crate::{ast::*, infer_eval::InferEvaluator, scope::*, symbol::*};
 #[derive(Debug, PartialEq, Clone)]
 pub struct SemaRef {
     pub symbol_id: SymbolId,
@@ -20,12 +20,12 @@ pub trait ToSemaTrait {
 
 impl ToSemaTrait for TransUnit {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
-        for func_decl in &mut self.func_decls {
-            func_decl.to_sema(symbol_table);
-        }
-
         for var_decl in &mut self.var_decls {
             var_decl.to_sema(symbol_table);
+        }
+
+        for func_decl in &mut self.func_decls {
+            func_decl.to_sema(symbol_table);
         }
     }
 }
@@ -106,6 +106,7 @@ impl ToSemaTrait for InfixExpr {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.lhs.to_sema(symbol_table);
         self.rhs.to_sema(symbol_table);
+        self.infer_ty = self.infer_type(&symbol_table);
     }
 }
 
@@ -190,7 +191,6 @@ impl ToSemaTrait for VarDecls {
     }
 }
 
-
 impl ToSemaTrait for ExprStmt {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         if let Some(expr) = &mut self.expr {
@@ -198,7 +198,6 @@ impl ToSemaTrait for ExprStmt {
         }
     }
 }
-
 
 impl ToSemaTrait for IfElseStmt {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {

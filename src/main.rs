@@ -14,7 +14,9 @@ fn main() -> ExitCode {
 
 #[test]
 fn test_all() {
-    env_logger::builder().filter_level(log::LevelFilter::Debug).init();
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Trace)
+        .init();
 
     use std::fs;
 
@@ -38,8 +40,8 @@ fn test_all() {
                 if extension != "sy" {
                     continue;
                 }
-            },
-            None => continue
+            }
+            None => continue,
         }
         info!("{}", path.to_str().unwrap());
         let file_stem = path.file_stem().unwrap().to_str().unwrap();
@@ -52,10 +54,12 @@ fn test_all() {
 
 #[test]
 fn test_single() {
-    env_logger::builder().filter_level(log::LevelFilter::Trace).init();
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Trace)
+        .init();
 
     let dir = "./tests/functional/";
-    let file_stem = "24_if_test5";
+    let file_stem = "01_var_defn2";
     let output_path = format!("{}{}.ll", dir, file_stem);
     let input_path = format!("{}{}.sy", dir, file_stem);
     let args = Args::parse_from(&["rockc", &input_path, "-o", &output_path]);

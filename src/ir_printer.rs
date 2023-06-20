@@ -1,3 +1,5 @@
+use clap::ValueEnum;
+
 use crate::{ast::*, ir::*};
 
 pub fn print(module: &Module) {
@@ -46,8 +48,8 @@ impl<'a> Printer<'a> {
         match inst_val {
             InstValue::InfixOp(_) => todo!(),
             InstValue::Load(_) => todo!(),
-            InstValue::Store(_) => todo!(),
-            InstValue::Alloca(_) => todo!(),
+            InstValue::Store(inst) => self.print_store_inst(inst),
+            InstValue::Alloca(inst) => self.print_alloca_inst(inst),
             InstValue::Branch(_) => todo!(),
             InstValue::Jump(_) => todo!(),
             InstValue::Gep(_) => todo!(),
@@ -56,6 +58,24 @@ impl<'a> Printer<'a> {
             InstValue::Phi(_) => todo!(),
             InstValue::Cast(_) => todo!(),
         }
+    }
+
+    pub fn print_store_inst(&self, inst: &StoreInst) {
+        let src_val = Value::resolve(inst.src, self.module);
+        let dst_val = Value::resolve(inst.dst, self.module);
+        let ty = Value::ty(dst_val);
+        print!(
+            "store {} {}, ptr {}",
+            self.format_type(&ty),
+            self.format_value(src_val),
+            self.format_value(dst_val)
+        );
+        println!();
+    }
+
+    pub fn print_alloca_inst(&self, inst: &AllocaInst) {
+        print!("%{} = alloca {}", inst.name, self.format_type(&inst.ty));
+        println!();
     }
 
     pub fn print_ret_inst(&self, inst: &ReturnInst) {
@@ -72,9 +92,25 @@ impl<'a> Printer<'a> {
             Value::GlobalVariable(_) => todo!(),
             Value::Function(_) => todo!(),
             Value::BasicBlock(_) => todo!(),
-            Value::Instruction(_) => todo!(),
+            Value::Instruction(inst) => self.format_inst(inst),
             Value::Const(c) => self.format_const(c),
             Value::ParameterValue(_) => todo!(),
+        }
+    }
+
+    pub fn format_inst(&self, inst: &InstValue) -> String {
+        match inst {
+            InstValue::Alloca(alloca) => format!("%{}", alloca.name),
+            InstValue::Branch(_) => todo!(),
+            InstValue::Call(_) => todo!(),
+            InstValue::Cast(_) => todo!(),
+            InstValue::Gep(_) => todo!(),
+            InstValue::InfixOp(bo) => todo!(),
+            InstValue::Jump(_) => todo!(),
+            InstValue::Load(_) => todo!(),
+            InstValue::Phi(_) => todo!(),
+            InstValue::Return(_) => todo!(),
+            InstValue::Store(_) => todo!(),
         }
     }
 
@@ -114,5 +150,4 @@ impl<'a> Printer<'a> {
             BuiltinType::Double => "double".to_string(),
         }
     }
-    
 }
