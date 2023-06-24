@@ -178,9 +178,6 @@ impl Builder {
             };
             let alloca_id = self.module.values.alloc(alloca.into());
             self.cur_bb_mut().insts.push_back(alloca_id);
-            self.module
-                .sym2def
-                .insert(decl.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
             match &decl.init {
                 Some(init_val) => {
                     let init_val_id = self.build_init_val(init_val, &decl.type_);
@@ -190,6 +187,9 @@ impl Builder {
                     };
                     let store_id = self.module.values.alloc(store_inst.into());
                     self.cur_bb_mut().insts.push_back(store_id);
+                    self.module
+                        .sym2def
+                        .insert(decl.sema_ref.as_ref().unwrap().symbol_id, store_id);
                 }
                 None => todo!(),
             }

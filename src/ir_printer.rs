@@ -1,24 +1,49 @@
+use std::{any::Any, fmt::format};
+
 use clap::ValueEnum;
 
 use crate::{ast::*, ir::*};
 
-pub fn print(module: &Module) {
-    let printer = Printer { module };
+pub fn print(module: &mut Module) {
+    let mut printer = Printer {
+        module: module,
+        next_id: 1,
+    };
     printer.print_module();
 }
 
 struct Printer<'a> {
     module: &'a Module,
+    next_id: usize,
 }
 
 impl<'a> Printer<'a> {
-    pub fn print_module(&self) {
+    pub fn print_module(&mut self) {
+        for (name, var_val_id) in &self.module.global_variables {
+            self.print_global_variable(name, var_val_id.to_owned());
+        }
+
         for (name, func_val_id) in &self.module.functions {
             self.print_function(name, func_val_id.to_owned());
         }
     }
 
-    pub fn print_function(&self, name: &str, func_val_id: ValueId) {
+    pub fn generate_local_name(&mut self) -> String {
+        let name = self.next_id.to_string();
+        self.next_id += 1;
+        name
+    }
+
+    pub fn print_global_variable(&mut self, name: &str, var_val_id: ValueId) {
+        let var = self.module.get_global_var(var_val_id);
+        match &var.initializer {
+            Some(val_id) => todo!(),
+            None => todo!(),
+        }
+        println!("@{} = global {} {}", name, self.format_type(&var.ty));
+    }
+
+    pub fn print_function(&mut self, name: &str, func_val_id: ValueId) {
         let func = self.module.get_func(func_val_id);
         println!("define {} @{}(", self.format_type(&func.ret_ty), name);
         for (i, arg_value_id) in func.params.iter().enumerate() {
@@ -35,7 +60,7 @@ impl<'a> Printer<'a> {
         println!("}}");
     }
 
-    pub fn print_block(&self, name: &str, bb_val_id: ValueId) {
+    pub fn print_block(&mut self, name: &str, bb_val_id: ValueId) {
         let bb = self.module.get_bb(bb_val_id);
         println!("{}:", name);
         for inst_val_id in &bb.insts {
@@ -44,7 +69,7 @@ impl<'a> Printer<'a> {
         }
     }
 
-    pub fn print_inst(&self, inst_val: &InstValue) {
+    pub fn print_inst(&mut self, inst_val: &InstValue) {
         match inst_val {
             InstValue::InfixOp(_) => todo!(),
             InstValue::Load(_) => todo!(),
@@ -60,7 +85,7 @@ impl<'a> Printer<'a> {
         }
     }
 
-    pub fn print_store_inst(&self, inst: &StoreInst) {
+    pub fn print_store_inst(&mut self, inst: &StoreInst) {
         let src_val = Value::resolve(inst.src, self.module);
         let dst_val = Value::resolve(inst.dst, self.module);
         let ty = Value::ty(dst_val);
@@ -78,18 +103,17 @@ impl<'a> Printer<'a> {
         println!();
     }
 
-    pub fn print_ret_inst(&self, inst: &ReturnInst) {
-        print!("ret ");
+    pub fn print_ret_inst(&mut self, inst: &ReturnInst) {
         if let Some(val_id) = &inst.value {
             let val = Value::resolve(*val_id, self.module);
-            print!("{}", self.format_value(val));
+            print!("ret {}", self.format_value(val));
         }
         println!();
     }
 
-    pub fn format_value(&self, val: &Value) -> String {
+    pub fn format_value(&mut self, val: &Value) -> String {
         match val {
-            Value::GlobalVariable(_) => todo!(),
+            Value::GlobalVariable(g_val) => format!("@{}", g_val.name),
             Value::Function(_) => todo!(),
             Value::BasicBlock(_) => todo!(),
             Value::Instruction(inst) => self.format_inst(inst),
@@ -98,20 +122,56 @@ impl<'a> Printer<'a> {
         }
     }
 
-    pub fn format_inst(&self, inst: &InstValue) -> String {
+    pub fn format_inst(&mut self, inst: &InstValue) -> String {
         match inst {
             InstValue::Alloca(alloca) => format!("%{}", alloca.name),
             InstValue::Branch(_) => todo!(),
             InstValue::Call(_) => todo!(),
             InstValue::Cast(_) => todo!(),
             InstValue::Gep(_) => todo!(),
-            InstValue::InfixOp(bo) => todo!(),
+            InstValue::InfixOp(bo) => self.format_binary_op(bo),
             InstValue::Jump(_) => todo!(),
             InstValue::Load(_) => todo!(),
             InstValue::Phi(_) => todo!(),
             InstValue::Return(_) => todo!(),
-            InstValue::Store(_) => todo!(),
+            InstValue::Store(store) => self.format_store_inst(store),
         }
+    }
+
+    pub fn format_store_inst(&mut self, inst: &StoreInst) -> String {
+        // let src_val = Value::resolve(inst.src, self.module);
+        let dst_val = Value::resolve(inst.dst, self.module);
+        let ty = Value::ty(dst_val);
+        let ret = format!("%{}", self.generate_local_name());
+        print!(
+            "{} = load {}, ptr {}",
+            ret,
+            self.format_type(&ty),
+            self.format_value(dst_val)
+        );
+        println!();
+        ret
+    }
+
+    pub fn format_binary_op(&mut self, bo: &BinaryOperator) -> String {
+        let lhs_val = Value::resolve(bo.left_operand, self.module);
+        let rhs_val = Value::resolve(bo.right_operand, self.module);
+        let ret = format!("%{}", self.generate_local_name());
+        let infix_op = match bo.operation {
+            InfixOp::Add => "add",
+            _ => todo!(),
+        }
+        .to_string();
+        print!(
+            "{} = {} {} {}, {}",
+            ret,
+            infix_op,
+            self.format_type(&bo.ty),
+            self.format_value(lhs_val),
+            self.format_value(rhs_val)
+        );
+        println!();
+        ret
     }
 
     pub fn format_const(&self, val: &ConstValue) -> String {

@@ -78,6 +78,13 @@ impl Module {
             _ => panic!("expect a function"),
         }
     }
+
+    pub fn get_global_var(&self, var_id: ValueId) -> &GlobalVariableValue {
+        match &self.values[var_id] {
+            Value::GlobalVariable(gv) => gv,
+            _ => panic!("expect a global variable"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
