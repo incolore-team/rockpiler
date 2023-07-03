@@ -475,6 +475,7 @@ impl Into<Value> for BranchInst {
 /// ret <ty> <value>
 #[derive(Debug, Clone)]
 pub struct ReturnInst {
+    // pub ty: Type,
     pub value: Option<ValueId>,
 }
 impl Into<Value> for ReturnInst {

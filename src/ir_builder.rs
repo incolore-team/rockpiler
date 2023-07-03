@@ -191,7 +191,11 @@ impl Builder {
                         .sym2def
                         .insert(decl.sema_ref.as_ref().unwrap().symbol_id, store_id);
                 }
-                None => todo!(),
+                None => {
+                    self.module
+                        .sym2def
+                        .insert(decl.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
+                }
             }
         }
     }
@@ -370,6 +374,11 @@ impl Builder {
                     let assign = StoreInst { src: rhs, dst: lhs };
                     let assign_id = self.module.values.alloc(assign.into());
                     self.cur_bb_mut().insts.push_back(assign_id);
+                    if let Expr::Primary(PrimaryExpr::Ident(ident_expr)) = infix_expr.lhs.as_ref() {
+                        self.module
+                            .sym2def
+                            .insert(ident_expr.sema_ref.as_ref().unwrap().symbol_id, assign_id);
+                    }
                     return assign_id;
                 }
 

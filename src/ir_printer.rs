@@ -7,7 +7,7 @@ use crate::{ast::*, ir::*};
 pub fn print(module: &mut Module) {
     let mut printer = Printer {
         module: module,
-        next_id: 1,
+        next_id: 0,
     };
     printer.print_module();
 }
@@ -36,11 +36,19 @@ impl<'a> Printer<'a> {
 
     pub fn print_global_variable(&mut self, name: &str, var_val_id: ValueId) {
         let var = self.module.get_global_var(var_val_id);
-        match &var.initializer {
-            Some(val_id) => todo!(),
+        let literal = match &var.initializer {
+            Some(val_id) => {
+                let val = Value::resolve(*val_id, self.module);
+                self.format_value(val)
+            }
             None => todo!(),
-        }
-        println!("@{} = global {} {}", name, self.format_type(&var.ty));
+        };
+        println!(
+            "@{} = global {} {}",
+            name,
+            self.format_type(&var.ty),
+            literal
+        );
     }
 
     pub fn print_function(&mut self, name: &str, func_val_id: ValueId) {
@@ -106,20 +114,33 @@ impl<'a> Printer<'a> {
     pub fn print_ret_inst(&mut self, inst: &ReturnInst) {
         if let Some(val_id) = &inst.value {
             let val = Value::resolve(*val_id, self.module);
-            print!("ret {}", self.format_value(val));
+            print!("ret {} {}", "i32", self.format_value(val));
         }
         println!();
     }
 
     pub fn format_value(&mut self, val: &Value) -> String {
         match val {
-            Value::GlobalVariable(g_val) => format!("@{}", g_val.name),
+            Value::GlobalVariable(g_val) => self.format_global_variable(g_val),
             Value::Function(_) => todo!(),
             Value::BasicBlock(_) => todo!(),
             Value::Instruction(inst) => self.format_inst(inst),
             Value::Const(c) => self.format_const(c),
             Value::ParameterValue(_) => todo!(),
         }
+    }
+
+    pub fn format_global_variable(&mut self, g_val: &GlobalVariableValue) -> String {
+        let ret = format!("%{}", self.generate_local_name());
+        let name = format!("@{}", g_val.name);
+        print!(
+            "{} = load {}, ptr {}",
+            ret,
+            self.format_type(&g_val.ty),
+            name
+        );
+        println!();
+        ret
     }
 
     pub fn format_inst(&mut self, inst: &InstValue) -> String {
@@ -142,13 +163,9 @@ impl<'a> Printer<'a> {
         // let src_val = Value::resolve(inst.src, self.module);
         let dst_val = Value::resolve(inst.dst, self.module);
         let ty = Value::ty(dst_val);
+        let ptr = self.format_value(dst_val);
         let ret = format!("%{}", self.generate_local_name());
-        print!(
-            "{} = load {}, ptr {}",
-            ret,
-            self.format_type(&ty),
-            self.format_value(dst_val)
-        );
+        print!("{} = load {}, ptr {}", ret, self.format_type(&ty), ptr);
         println!();
         ret
     }
@@ -156,19 +173,21 @@ impl<'a> Printer<'a> {
     pub fn format_binary_op(&mut self, bo: &BinaryOperator) -> String {
         let lhs_val = Value::resolve(bo.left_operand, self.module);
         let rhs_val = Value::resolve(bo.right_operand, self.module);
-        let ret = format!("%{}", self.generate_local_name());
         let infix_op = match bo.operation {
             InfixOp::Add => "add",
             _ => todo!(),
         }
         .to_string();
+        let lhs = self.format_value(lhs_val);
+        let rhs = self.format_value(rhs_val);
+        let ret = format!("%{}", self.generate_local_name());
         print!(
             "{} = {} {} {}, {}",
             ret,
             infix_op,
             self.format_type(&bo.ty),
-            self.format_value(lhs_val),
-            self.format_value(rhs_val)
+            lhs,
+            rhs
         );
         println!();
         ret

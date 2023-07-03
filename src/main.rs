@@ -59,7 +59,7 @@ fn test_single() {
         .init();
 
     let dir = "./tests/functional/";
-    let file_stem = "01_var_defn2";
+    let file_stem = "02_var_defn3";
     let output_path = format!("{}{}.ll", dir, file_stem);
     let input_path = format!("{}{}.sy", dir, file_stem);
     let args = Args::parse_from(&["rockc", &input_path, "-o", &output_path]);
