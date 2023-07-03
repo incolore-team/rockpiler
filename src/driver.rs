@@ -17,10 +17,10 @@ pub fn drive(args: Args) {
         let mut syms = SymbolTable::new();
         let mut ast = ast.unwrap();
         ast.to_sema(&mut syms);
-        trace!("syms: {}", syms.print_table());
+        trace!("syms: \n{}", syms.print_table());
         trace!("ast: {:?}", ast);
         trace!("================== SEMA+AST => Pre-SSA IR ==================");
-        let module = crate::ir_builder::build(&mut ast, syms);
-        ir_printer::print(&module);
+        let mut module = crate::ir_builder::build(&mut ast, syms);
+        ir_printer::print(&mut module);
     }
 }

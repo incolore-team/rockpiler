@@ -56,6 +56,8 @@ lazy_static::lazy_static! {
         use pest::pratt_parser::*;
         // Precedence is defined lowest to highest
         let pratt = PrattParser::new()
+        // Level 13
+        .op(Op::infix(Rule::assign, Assoc::Right))
         // Level 12
         .op(Op::infix(Rule::logic_or, Assoc::Left))
         // Level 11
