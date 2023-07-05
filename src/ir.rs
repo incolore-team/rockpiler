@@ -94,7 +94,7 @@ pub enum Value {
     BasicBlock(BasicBlockValue),
     Instruction(InstValue),
     Const(ConstValue),
-    ParameterValue(ParameterValue),
+    VariableValue(VariableValue),
 }
 
 impl Value {
@@ -116,7 +116,7 @@ impl Value {
             Value::BasicBlock(_) => Type::Builtin(BuiltinType::Void),
             Value::Instruction(inst) => inst.ty(),
             Value::Const(c) => c.ty(),
-            Value::ParameterValue(p) => p.ty.clone(),
+            Value::VariableValue(p) => p.ty.clone(),
         }
     }
 }
@@ -148,9 +148,9 @@ impl FunctionValue {
         }
     }
 
-    pub fn resolve_param(param_value_id: ValueId, module: &Module) -> &ParameterValue {
+    pub fn resolve_param(param_value_id: ValueId, module: &Module) -> &VariableValue {
         match &module.values[param_value_id] {
-            Value::ParameterValue(p) => p,
+            Value::VariableValue(p) => p,
             _ => panic!("expect a parameter"),
         }
     }
@@ -203,7 +203,7 @@ impl BasicBlockValue {
 
 /// 在 LLVM 叫 Argument
 #[derive(Debug, Clone)]
-pub struct ParameterValue {
+pub struct VariableValue {
     pub name: String,
     pub ty: Type,
 }

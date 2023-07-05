@@ -65,7 +65,7 @@ impl Builder {
             let param_value = self
                 .module
                 .values
-                .alloc(Value::ParameterValue(ParameterValue {
+                .alloc(Value::VariableValue(VariableValue {
                     name: param_name,
                     ty: param_ty,
                 }));

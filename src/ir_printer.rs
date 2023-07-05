@@ -126,7 +126,7 @@ impl<'a> Printer<'a> {
             Value::BasicBlock(_) => todo!(),
             Value::Instruction(inst) => self.format_inst(inst),
             Value::Const(c) => self.format_const(c),
-            Value::ParameterValue(_) => todo!(),
+            Value::VariableValue(_) => todo!(),
         }
     }
 
