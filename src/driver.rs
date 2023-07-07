@@ -21,6 +21,7 @@ pub fn drive(args: Args) {
         trace!("ast: {:?}", ast);
         trace!("================== SEMA+AST => Pre-SSA IR ==================");
         let mut module = crate::ir_builder::build(&mut ast, syms);
+        trace!("================== Pre-SSA Module as LLVM IR ==================");
         ir_printer::print(&mut module);
     }
 }

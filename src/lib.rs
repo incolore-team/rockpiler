@@ -14,3 +14,4 @@ pub mod sema;
 pub mod ir_builder;
 pub mod ir_printer;
 pub mod infer_eval;
+pub mod pass;

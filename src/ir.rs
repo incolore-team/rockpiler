@@ -79,6 +79,20 @@ impl Module {
         }
     }
 
+    pub fn get_inst_mut(&mut self, inst_id: ValueId) -> &mut InstValue {
+        match &mut self.values[inst_id] {
+            Value::Instruction(inst) => inst,
+            _ => panic!("expect an instruction"),
+        }
+    }
+
+    pub fn get_inst(&self, inst_id: ValueId) -> &InstValue {
+        match &self.values[inst_id] {
+            Value::Instruction(inst) => inst,
+            _ => panic!("expect an instruction"),
+        }
+    }
+
     pub fn get_global_var(&self, var_id: ValueId) -> &GlobalVariableValue {
         match &self.values[var_id] {
             Value::GlobalVariable(gv) => gv,
@@ -159,7 +173,7 @@ impl FunctionValue {
 #[derive(Debug, Clone, Default)]
 pub struct BasicBlockList {
     pub bbs: LinkedHashMap<String, ValueId>,
-    pub next_id: usize,
+    pub next_id: usize, // next id of basic block
 }
 
 impl BasicBlockList {

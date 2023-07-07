@@ -1,6 +1,6 @@
 use std::fs;
 
 fn main() {
-    fs::copy("target/debug/rockc", "target/debug/compiler")
-        .expect("Unable to copy binary");
+    // fs::copy("target/debug/rockc", "target/debug/compiler")
+        // .expect("Unable to copy binary");
 }
