@@ -41,7 +41,7 @@ impl<'a> Printer<'a> {
                 let val = Value::resolve(*val_id, self.module);
                 self.format_value(val)
             }
-            None => todo!(),
+            None => "zeroinitializer".to_string(),
         };
         println!(
             "@{} = global {} {}",
