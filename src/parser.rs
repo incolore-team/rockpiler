@@ -180,20 +180,32 @@ pub fn parse_normal_var_decls(pair: Pair<Rule>) -> ParseResult<Vec<VarDecl>> {
 
 // var_def = { ID ~ ("[" ~ const_expr ~ "]")* ~ "=" ~ init_val | ID ~ ("[" ~ const_expr ~ "]")* }
 pub fn parse_var_def(pair: Pair<Rule>, type_: &Type, is_const: bool) -> ParseResult<VarDecl> {
+    _debug_rule("parse_var_def", &pair);
     let mut inner = pair.into_inner();
     let name = inner.next().unwrap().as_str().to_owned();
     let mut init = None;
+    let mut const_exprs = Vec::new();
 
     for item in inner {
         match item.as_rule() {
             Rule::init_val => init = Some(parse_init_val(item)?),
+            Rule::const_expr => const_exprs.push(parse_const_expr(item)?),
             _ => (),
         }
     }
 
+    let mut var_type = type_.clone();
+    for const_expr in const_exprs.iter().rev() {
+        var_type = Type::Array(ArrayType::Constant(ConstantArrayType {
+            element_type: Box::new(var_type),
+            size: 0,
+            size_info: Some(const_expr.clone()),
+        }));
+    }
+
     Ok(VarDecl {
         name,
-        type_: type_.clone(),
+        type_: var_type,
         is_const,
         init,
         sema_ref: None,

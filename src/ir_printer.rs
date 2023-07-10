@@ -207,10 +207,25 @@ impl<'a> Printer<'a> {
         match ty {
             Type::Builtin(t) => self.format_builtin_type(t),
             Type::Pointer(_) => todo!(),
-            Type::Array(_) => todo!(),
+            Type::Array(t) => self.format_array_type(t),
             Type::Record(_) => todo!(),
             Type::Function(_) => todo!(),
         }
+    }
+
+    pub fn format_array_type(&self, ty: &ArrayType) -> String {
+        match ty {
+            ArrayType::Constant(t) => self.format_const_array_type(t),
+            _ => todo!(),
+        }
+    }
+
+    pub fn format_const_array_type(&self, ty: &ConstantArrayType) -> String {
+        format!(
+            "[{} x {}]",
+            ty.size,
+            self.format_type(ty.element_type.as_ref())
+        )
     }
 
     pub fn format_builtin_type(&self, ty: &BuiltinType) -> String {
