@@ -54,8 +54,30 @@ impl ToSemaTrait for FuncDecl {
     }
 }
 
+fn eval_array_type(at: &mut ArrayType, symbol_table: &mut SymbolTable) {
+    match at {
+        ArrayType::Constant(const_at) => {
+            const_at.size = const_at
+                .size_info
+                .as_ref()
+                .unwrap()
+                .eval_literal(&symbol_table)
+                .unwrap()
+                .into();
+            if let Type::Array(at) = const_at.element_type.as_mut() {
+                eval_array_type(at, symbol_table);
+            }
+        }
+        _ => (),
+    }
+}
+
 impl ToSemaTrait for VarDecl {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
+        match &mut self.type_ {
+            Type::Array(at) => eval_array_type(at, symbol_table),
+            _ => (),
+        };
         let symbol = Symbol::Var(VarSymbol::new(self.clone()));
         let symbol_id = symbol_table.insert_symbol(self.name.clone(), symbol);
         self.sema_ref = Some(SemaRef::new(symbol_id, symbol_table.scope_id()));

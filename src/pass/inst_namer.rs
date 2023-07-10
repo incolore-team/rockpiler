@@ -12,7 +12,10 @@ pub struct InstNamer<'a> {
 
 impl InstNamer<'_> {
     pub fn new(module: &mut Module) -> InstNamer {
-        InstNamer { module: module, next_id: 1 }
+        InstNamer {
+            module: module,
+            next_id: 1,
+        }
     }
 
     pub fn run(&mut self) {
@@ -42,8 +45,8 @@ impl InstNamer<'_> {
     }
 
     pub fn generate_local_name(&mut self) -> String {
-        let name = self.module.next_id.to_string();
-        self.module.next_id += 1;
+        let name = self.next_id.to_string();
+        self.next_id += 1;
         name
     }
 }
