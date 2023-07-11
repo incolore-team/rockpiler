@@ -32,6 +32,8 @@ pub struct Module {
 
     // value -> users of the value
     pub value_user: HashMap<ValueId, Vec<ValueId>>,
+    // value -> name of the value
+    pub value_name: HashMap<ValueId, String>,
 }
 
 impl Module {
@@ -46,6 +48,7 @@ impl Module {
             builtins: LinkedHashMap::new(),
             constants: LinkedHashMap::new(),
             value_user: HashMap::new(),
+            value_name: HashMap::new(),
         };
         // module.add_builtin_types();
         module
@@ -253,6 +256,22 @@ impl InstValue {
             InstValue::Cast(inst) => inst.new_ty.clone(),
         }
     }
+
+    pub fn has_output(&self) -> bool {
+        match self {
+            InstValue::InfixOp(_) => true,
+            InstValue::Load(_) => true,
+            InstValue::Store(_) => false,
+            InstValue::Alloca(_) => true,
+            InstValue::Branch(_) => false,
+            InstValue::Jump(_) => false,
+            InstValue::Gep(_) => true,
+            InstValue::Return(_) => false,
+            InstValue::Call(_) => true,
+            InstValue::Phi(_) => true,
+            InstValue::Cast(_) => true,
+        }
+    }
 }
 
 /// An immediate value.
@@ -362,9 +381,9 @@ impl Into<Value> for AllocaInst {
 #[derive(Debug, Clone)]
 pub struct BinaryOperator {
     pub ty: Type,
-    pub operation: InfixOp,
-    pub left_operand: ValueId,
-    pub right_operand: ValueId,
+    pub op: InfixOp,
+    pub lhs: ValueId,
+    pub rhs: ValueId,
 }
 
 impl Into<Value> for BinaryOperator {
@@ -420,9 +439,8 @@ impl Into<Value> for CastInst {
 /// load <ty>, <ty>* <source>
 #[derive(Debug, Clone)]
 pub struct LoadInst {
-    pub name: String,
     pub ty: Type,
-    pub source: ValueId,
+    pub src: ValueId,
 }
 
 impl Into<Value> for LoadInst {

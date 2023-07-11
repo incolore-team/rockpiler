@@ -29,6 +29,7 @@ pub enum InfixOp {
     Sub,
     Mul,
     Div,
+    Rem,
     Mod,
     Eq,
     Ne,

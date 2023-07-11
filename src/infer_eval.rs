@@ -100,7 +100,7 @@ impl InferEvaluator for InfixExpr {
                 // 返回 bool 类型
                 return Some(Type::Builtin(BuiltinType::Bool));
             }
-            InfixOp::Assign => {
+            InfixOp::Assign | InfixOp::Rem => {
                 // 如果左右类型一致，则返回该类型
                 if lhs_type == rhs_type {
                     return Some(lhs_type);
@@ -136,7 +136,8 @@ impl InferEvaluator for InfixExpr {
             InfixOp::Ge => lhs_val.ge(&rhs_val),
             InfixOp::LogicAnd => lhs_val.log_and(&rhs_val),
             InfixOp::LogicOr => lhs_val.log_or(&rhs_val),
-            InfixOp::Assign => unreachable!()
+            InfixOp::Assign => unreachable!(),
+            InfixOp::Rem => unimplemented!(),
         }
     }
 }

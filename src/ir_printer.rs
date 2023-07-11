@@ -5,16 +5,12 @@ use clap::ValueEnum;
 use crate::{ast::*, ir::*};
 
 pub fn print(module: &mut Module) {
-    let mut printer = Printer {
-        module: module,
-        next_id: 0,
-    };
+    let mut printer = Printer { module: module };
     printer.print_module();
 }
 
 struct Printer<'a> {
     module: &'a Module,
-    next_id: usize,
 }
 
 impl<'a> Printer<'a> {
@@ -28,18 +24,12 @@ impl<'a> Printer<'a> {
         }
     }
 
-    pub fn generate_local_name(&mut self) -> String {
-        let name = self.next_id.to_string();
-        self.next_id += 1;
-        name
-    }
-
-    pub fn print_global_variable(&mut self, name: &str, var_val_id: ValueId) {
-        let var = self.module.get_global_var(var_val_id);
+    pub fn print_global_variable(&mut self, name: &str, val_id: ValueId) {
+        let var = self.module.get_global_var(val_id);
         let literal = match &var.initializer {
             Some(val_id) => {
                 let val = Value::resolve(*val_id, self.module);
-                self.format_value(val)
+                self.format_value(val_id, val)
             }
             None => todo!(),
         };
@@ -73,20 +63,20 @@ impl<'a> Printer<'a> {
         println!("{}:", name);
         for inst_val_id in &bb.insts {
             let inst = BasicBlockValue::resolve_inst(*inst_val_id, self.module);
-            self.print_inst(inst);
+            self.print_inst(inst_val_id, inst);
         }
     }
 
-    pub fn print_inst(&mut self, inst_val: &InstValue) {
+    pub fn print_inst(&mut self, val_id: &ValueId, inst_val: &InstValue) {
         match inst_val {
-            InstValue::InfixOp(_) => todo!(),
-            InstValue::Load(_) => todo!(),
+            InstValue::InfixOp(_) => self.print_infix_op_inst(val_id, inst_val),
+            InstValue::Load(inst) => self.print_load_inst(val_id, inst),
             InstValue::Store(inst) => self.print_store_inst(inst),
-            InstValue::Alloca(inst) => self.print_alloca_inst(inst),
+            InstValue::Alloca(inst) => self.print_alloca_inst(val_id, inst),
             InstValue::Branch(_) => todo!(),
             InstValue::Jump(_) => todo!(),
             InstValue::Gep(_) => todo!(),
-            InstValue::Return(inst) => self.print_ret_inst(inst),
+            InstValue::Return(inst) => self.print_ret_inst(val_id, inst),
             InstValue::Call(_) => todo!(),
             InstValue::Phi(_) => todo!(),
             InstValue::Cast(_) => todo!(),
@@ -100,87 +90,165 @@ impl<'a> Printer<'a> {
         print!(
             "store {} {}, ptr {}",
             self.format_type(&ty),
-            self.format_value(src_val),
-            self.format_value(dst_val)
+            self.format_value(&inst.src, src_val),
+            self.format_value(&inst.dst, dst_val)
+        );
+        println!();
+    }
+    pub fn print_load_inst(&mut self, val_id: &ValueId, inst: &LoadInst) {
+        let src_val = Value::resolve(inst.src, self.module);
+        let ty = Value::ty(src_val);
+        print!(
+            "{} = load {}, ptr {}",
+            self.resolve_name(&val_id),
+            self.format_type(&ty),
+            self.resolve_name(&inst.src)
+        );
+        println!();
+    }
+    pub fn print_infix_op_inst(&mut self, val_id: &ValueId, inst: &InstValue) {
+        let inst = match inst {
+            InstValue::InfixOp(inst) => inst,
+            _ => unreachable!(),
+        };
+        let lhs_val = Value::resolve(inst.lhs, self.module);
+        let rhs_val = Value::resolve(inst.rhs, self.module);
+        let ty = Value::ty(lhs_val);
+        print!(
+            "{} = {} {} {}, {}",
+            self.resolve_name(val_id),
+            self.format_infix_op(&inst.op),
+            self.format_type(&ty),
+            self.format_value(&inst.lhs, lhs_val),
+            self.format_value(&inst.rhs, rhs_val)
         );
         println!();
     }
 
-    pub fn print_alloca_inst(&self, inst: &AllocaInst) {
-        print!("%{} = alloca {}", inst.name, self.format_type(&inst.ty));
+    pub fn format_infix_op(&mut self, op: &InfixOp) -> String {
+        match op {
+            InfixOp::Add => "add".to_string(),
+            InfixOp::Sub => "sub".to_string(),
+            InfixOp::Mul => "mul".to_string(),
+            InfixOp::Div => "sdiv".to_string(),
+            InfixOp::Rem => "srem".to_string(),
+            InfixOp::Eq => "icmp eq".to_string(),
+            InfixOp::Ne => "icmp ne".to_string(),
+            InfixOp::Lt => "icmp slt".to_string(),
+            InfixOp::Le => "icmp sle".to_string(),
+            InfixOp::Gt => "icmp sgt".to_string(),
+            InfixOp::Ge => "icmp sge".to_string(),
+            InfixOp::BitAnd => todo!(),
+            InfixOp::BitOr => todo!(),
+            InfixOp::BitXor => todo!(),
+            InfixOp::BitShl => todo!(),
+            InfixOp::BitShr => todo!(),
+            InfixOp::LogicAnd => todo!(),
+            InfixOp::LogicOr => todo!(),
+            InfixOp::Mod => todo!(),
+            InfixOp::Assign => todo!(),
+        }
+    }
+
+    pub fn print_alloca_inst(&self, val_id: &ValueId, inst: &AllocaInst) {
+        print!("{} = alloca {}", self.resolve_name(val_id), self.format_type(&inst.ty));
         println!();
     }
 
-    pub fn print_ret_inst(&mut self, inst: &ReturnInst) {
+    pub fn print_ret_inst(&mut self, val_id: &ValueId, inst: &ReturnInst) {
         if let Some(val_id) = &inst.value {
             let val = Value::resolve(*val_id, self.module);
-            print!("ret {} {}", "i32", self.format_value(val));
+            print!("ret {} {}", "i32", self.format_value(val_id, val));
         }
         println!();
     }
 
-    pub fn format_value(&mut self, val: &Value) -> String {
+    pub fn format_value(&mut self, val_id: &ValueId, val: &Value) -> String {
         match val {
-            Value::GlobalVariable(g_val) => self.format_global_variable(g_val),
+            Value::GlobalVariable(g_val) => todo!(),
             Value::Function(_) => todo!(),
             Value::BasicBlock(_) => todo!(),
-            Value::Instruction(inst) => self.format_inst(inst),
+            // Value::Instruction(inst) => self.format_inst(val_id, inst),
+            Value::Instruction(inst) => self.resolve_name(val_id),
             Value::Const(c) => self.format_const(c),
             Value::VariableValue(_) => todo!(),
         }
     }
 
-    pub fn format_global_variable(&mut self, g_val: &GlobalVariableValue) -> String {
-        let ret = format!("%{}", self.generate_local_name());
-        let name = format!("@{}", g_val.name);
+    // pub fn format_global_variable(&mut self, g_val: &GlobalVariableValue) -> String {
+    //     let ret = self.module.value_name(g_val.id);
+    //     let name = format!("@{}", g_val.name);
+    //     print!(
+    //         "{} = load {}, ptr {}",
+    //         ret,
+    //         self.format_type(&g_val.ty),
+    //         name
+    //     );
+    //     println!();
+    //     ret
+    // }
+
+    pub fn format_inst(&mut self, val_id: &ValueId, inst: &InstValue) -> String {
+        match inst {
+            InstValue::Alloca(alloca) => self.format_alloca_inst(val_id, alloca),
+            InstValue::Branch(_) => todo!(),
+            InstValue::Call(_) => todo!(),
+            InstValue::Cast(_) => todo!(),
+            InstValue::Gep(_) => todo!(),
+            InstValue::InfixOp(bo) => self.format_binary_op(val_id, bo),
+            InstValue::Jump(_) => todo!(),
+            InstValue::Load(_) => todo!(),
+            InstValue::Phi(_) => todo!(),
+            InstValue::Return(_) => todo!(),
+            InstValue::Store(store) => self.format_store_inst(val_id, store),
+        }
+    }
+
+    pub fn format_alloca_inst(&mut self, val_id: &ValueId, inst: &AllocaInst) -> String {
+        let ret = self.resolve_name(val_id);
         print!(
-            "{} = load {}, ptr {}",
+            "{} = alloca {}",
             ret,
-            self.format_type(&g_val.ty),
-            name
+            self.format_type(&inst.ty)
         );
         println!();
         ret
     }
 
-    pub fn format_inst(&mut self, inst: &InstValue) -> String {
-        match inst {
-            InstValue::Alloca(alloca) => format!("%{}", alloca.name),
-            InstValue::Branch(_) => todo!(),
-            InstValue::Call(_) => todo!(),
-            InstValue::Cast(_) => todo!(),
-            InstValue::Gep(_) => todo!(),
-            InstValue::InfixOp(bo) => self.format_binary_op(bo),
-            InstValue::Jump(_) => todo!(),
-            InstValue::Load(_) => todo!(),
-            InstValue::Phi(_) => todo!(),
-            InstValue::Return(_) => todo!(),
-            InstValue::Store(store) => self.format_store_inst(store),
-        }
-    }
-
-    pub fn format_store_inst(&mut self, inst: &StoreInst) -> String {
-        // let src_val = Value::resolve(inst.src, self.module);
+    pub fn format_store_inst(&mut self, val_id: &ValueId, inst: &StoreInst) -> String {
+        let ret = self.resolve_name(val_id);
+        let src_val = Value::resolve(inst.src, self.module);
         let dst_val = Value::resolve(inst.dst, self.module);
-        let ty = Value::ty(dst_val);
-        let ptr = self.format_value(dst_val);
-        let ret = format!("%{}", self.generate_local_name());
-        print!("{} = load {}, ptr {}", ret, self.format_type(&ty), ptr);
+        print!(
+            "{} = store {} {}, {}",
+            ret,
+            self.format_type(&Value::ty(src_val)),
+            self.format_value(&inst.src, src_val),
+            self.format_value(&inst.dst, dst_val)
+        );
         println!();
         ret
     }
 
-    pub fn format_binary_op(&mut self, bo: &BinaryOperator) -> String {
-        let lhs_val = Value::resolve(bo.left_operand, self.module);
-        let rhs_val = Value::resolve(bo.right_operand, self.module);
-        let infix_op = match bo.operation {
+    pub fn resolve_name(&self, val_id: &ValueId) -> String {
+        let name = self.module.value_name.get(val_id);
+        if let Some(name) = name {
+            return name.clone();
+        }
+        panic!("no name for value: {:?}", val_id)
+    }
+
+    pub fn format_binary_op(&mut self, val_id: &ValueId, bo: &BinaryOperator) -> String {
+        let lhs_val = Value::resolve(bo.lhs, self.module);
+        let rhs_val = Value::resolve(bo.rhs, self.module);
+        let infix_op = match bo.op {
             InfixOp::Add => "add",
             _ => todo!(),
         }
         .to_string();
-        let lhs = self.format_value(lhs_val);
-        let rhs = self.format_value(rhs_val);
-        let ret = format!("%{}", self.generate_local_name());
+        let lhs = self.format_value(&bo.lhs, lhs_val);
+        let rhs = self.format_value(&bo.rhs, rhs_val);
+        let ret = self.resolve_name(val_id);
         print!(
             "{} = {} {} {}, {}",
             ret,

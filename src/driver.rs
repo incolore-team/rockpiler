@@ -1,6 +1,6 @@
 use log::trace;
 
-use crate::{cli::Args, ir_printer, scope::SymbolTable, sema::ToSemaTrait};
+use crate::{cli::Args, ir_printer, scope::SymbolTable, sema::ToSemaTrait, pass::inst_namer};
 
 pub fn drive(args: Args) {
     assert!(args.inputs.len() > 0);
@@ -21,6 +21,7 @@ pub fn drive(args: Args) {
         trace!("ast: {:?}", ast);
         trace!("================== SEMA+AST => Pre-SSA IR ==================");
         let mut module = crate::ir_builder::build(&mut ast, syms);
+        inst_namer::run(&mut module);
         trace!("================== Pre-SSA Module as LLVM IR ==================");
         ir_printer::print(&mut module);
     }

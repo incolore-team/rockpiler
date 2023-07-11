@@ -24,6 +24,15 @@ impl Builder {
         }
     }
 
+    pub fn alloc_value(&mut self, val: Value) -> ValueId {
+        let val_id = self.module.values.alloc(val);
+        let idx = val_id.index();
+        if idx > 131072 {
+            panic!("too many values");
+        }
+        val_id
+    }
+
     pub fn cur_bb_mut(&mut self) -> &mut BasicBlockValue {
         self.module.get_bb_mut(self.cur_bb.unwrap())
     }
@@ -76,14 +85,14 @@ impl Builder {
         let mut cur_func = FunctionValue::new(name, params, ret_ty, is_var_arg);
         let entry_bb = BasicBlockValue::new("entry".to_string());
 
-        let entry_bb_id = self.module.values.alloc(Value::BasicBlock(entry_bb));
+        let entry_bb_id = self.alloc_value(Value::BasicBlock(entry_bb));
         cur_func
             .bbs
             .append_with_name(entry_bb_id, "entry".to_string());
 
         self.cur_bb = Some(entry_bb_id);
 
-        let function_id = self.module.values.alloc(Value::Function(cur_func));
+        let function_id = self.alloc_value(Value::Function(cur_func));
         self.module
             .functions
             .insert(func_decl.name.clone(), function_id);
@@ -113,7 +122,7 @@ impl Builder {
             initializer,
         };
 
-        let global_var_id = self.module.values.alloc(Value::GlobalVariable(global_var));
+        let global_var_id = self.alloc_value(Value::GlobalVariable(global_var));
         self.module.global_variables.insert(name, global_var_id);
         self.module
             .sym2def
@@ -136,7 +145,7 @@ impl Builder {
                 //     .collect();
 
                 // let const_array = ConstArray { ty, values };
-                // let const_id = self.module.values.alloc(Value::Const(ConstValue::Array(const_array)));
+                // let const_id = self.alloc_value(Value::Const(ConstValue::Array(const_array)));
                 // const_id
                 todo!()
             }
@@ -176,7 +185,7 @@ impl Builder {
                 ty: self.build_type(&decl.type_),
                 name: decl.name.clone(),
             };
-            let alloca_id = self.module.values.alloc(alloca.into());
+            let alloca_id = self.alloc_value(alloca.into());
             self.cur_bb_mut().insts.push_back(alloca_id);
             match &decl.init {
                 Some(init_val) => {
@@ -185,11 +194,11 @@ impl Builder {
                         src: init_val_id,
                         dst: alloca_id,
                     };
-                    let store_id = self.module.values.alloc(store_inst.into());
+                    let store_id = self.alloc_value(store_inst.into());
                     self.cur_bb_mut().insts.push_back(store_id);
                     self.module
                         .sym2def
-                        .insert(decl.sema_ref.as_ref().unwrap().symbol_id, store_id);
+                        .insert(decl.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
                 }
                 None => {
                     self.module
@@ -259,7 +268,7 @@ impl Builder {
             then_bb,
             else_bb,
         };
-        let br_id = self.module.values.alloc(br.into());
+        let br_id = self.alloc_value(br.into());
         br_id
     }
 
@@ -271,7 +280,7 @@ impl Builder {
 
     pub fn alloc_jump_inst(&mut self, bb: ValueId) -> ValueId {
         let jump = JumpInst { bb };
-        let jump_id = self.module.values.alloc(jump.into());
+        let jump_id = self.alloc_value(jump.into());
         jump_id
     }
 
@@ -283,7 +292,7 @@ impl Builder {
 
     pub fn alloc_basic_block(&mut self) -> ValueId {
         let bb = BasicBlockValue::default();
-        let bb_id = self.module.values.alloc(Value::BasicBlock(bb));
+        let bb_id = self.alloc_value(Value::BasicBlock(bb));
         bb_id
     }
     pub fn build_basic_block(&mut self) -> ValueId {
@@ -353,7 +362,7 @@ impl Builder {
 
     pub fn build_return_inst(&mut self, value: Option<ValueId>) -> ValueId {
         let ret = ReturnInst { value };
-        let ret_id = self.module.values.alloc(ret.into());
+        let ret_id = self.alloc_value(ret.into());
         self.cur_bb_mut().insts.push_back(ret_id);
         ret_id
     }
@@ -372,7 +381,7 @@ impl Builder {
 
                 if infix_expr.op == InfixOp::Assign {
                     let assign = StoreInst { src: rhs, dst: lhs };
-                    let assign_id = self.module.values.alloc(assign.into());
+                    let assign_id = self.alloc_value(assign.into());
                     self.cur_bb_mut().insts.push_back(assign_id);
                     if let Expr::Primary(PrimaryExpr::Ident(ident_expr)) = infix_expr.lhs.as_ref() {
                         self.module
@@ -384,11 +393,15 @@ impl Builder {
 
                 let bin_op = BinaryOperator {
                     ty: infix_expr.infer_ty.as_ref().unwrap().clone(),
-                    operation: infix_expr.op.clone(),
-                    left_operand: lhs,
-                    right_operand: rhs,
+                    op: infix_expr.op.clone(),
+                    lhs,
+                    rhs,
                 };
-                self.module.values.alloc(bin_op.into())
+
+                let val_id = self.alloc_value(bin_op.into());
+                self.cur_bb_mut().insts.push_back(val_id);
+                val_id
+
             }
             Expr::Prefix(prefix_expr) => {
                 let rhs = self.build_expr(&prefix_expr.rhs);
@@ -398,14 +411,16 @@ impl Builder {
                     _ => todo!(),
                 };
                 let zero = ConstValue::zero_of(prefix_expr.infer_ty.as_ref().unwrap().clone());
-                let zero_id = self.module.values.alloc(zero.into());
+                let zero_id = self.alloc_value(zero.into());
                 let bin_op = BinaryOperator {
                     ty: prefix_expr.infer_ty.as_ref().unwrap().clone(),
-                    operation: op,
-                    left_operand: zero_id,
-                    right_operand: rhs,
+                    op,
+                    lhs: zero_id,
+                    rhs,
                 };
-                self.module.values.alloc(bin_op.into())
+                let val_id = self.alloc_value(bin_op.into());
+                self.cur_bb_mut().insts.push_back(val_id);
+                val_id
             }
             Expr::Postfix(postfix_expr) => {
                 let _lhs = self.build_expr(&postfix_expr.lhs);
@@ -442,7 +457,9 @@ impl Builder {
                         callee: func_id.clone(),
                         args,
                     };
-                    self.module.values.alloc(call_inst.into())
+                    let val_id = self.alloc_value(call_inst.into());
+                    self.cur_bb_mut().insts.push_back(val_id);
+                    val_id
                 }
                 PrimaryExpr::Ident(ident_expr) => {
                     /*
@@ -453,7 +470,14 @@ impl Builder {
                     // log::debug!("sym_id: {:?}, _symbol: {:?}", sym_id, _symbol);
                     // log::debug!("sym2def: {:?}", self.module.sym2def);
                     let var_val_id = self.module.sym2def.get(&sym_id).unwrap().clone();
-                    var_val_id
+                    let load_inst = LoadInst {
+                        ty: self.module.values.get(var_val_id).unwrap().ty(),
+                        src: var_val_id,
+                    };
+
+                    let val_id = self.alloc_value(load_inst.into());
+                    self.cur_bb_mut().insts.push_back(val_id);
+                    val_id
                 }
                 PrimaryExpr::Literal(literal) => self.build_literal(literal),
             },
@@ -467,21 +491,21 @@ impl Builder {
                     ty: BuiltinType::Int.into(),
                     value: *int,
                 };
-                self.module.values.alloc(int_value.into())
+                self.alloc_value(int_value.into())
             }
             Literal::Float(float) => {
                 let float_value = ConstFloat {
                     ty: BuiltinType::Float.into(),
                     value: *float,
                 };
-                self.module.values.alloc(float_value.into())
+                self.alloc_value(float_value.into())
             }
             Literal::Bool(bool) => {
                 let bool_value = ConstInt {
                     ty: BuiltinType::Bool.into(),
                     value: *bool as i64,
                 };
-                self.module.values.alloc(bool_value.into())
+                self.alloc_value(bool_value.into())
             }
             Literal::String(_string) => {
                 todo!("build string literal")
