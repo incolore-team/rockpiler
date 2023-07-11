@@ -118,7 +118,6 @@ impl Param {
     }
 }
 
-
 #[derive(Debug, PartialEq, Clone)]
 pub struct Block {
     pub stmts: Vec<Box<Stmt>>,
@@ -239,7 +238,6 @@ pub struct CallExpr {
 
     pub sema_ref: Option<SemaRef>,
 
-
     pub infer_ty: Option<Type>,
     pub infer_val: Option<Literal>,
 }
@@ -258,6 +256,16 @@ pub enum Literal {
     Float(f64),
     Bool(bool),
     String(String),
+}
+
+impl From<Literal> for usize {
+    fn from(literal: Literal) -> Self {
+        if let Literal::Int(value) = literal {
+            value as usize
+        } else {
+            panic!("invalid array size");
+        }
+    }
 }
 
 // ===================== End Expr =====================
@@ -317,7 +325,6 @@ impl Into<Type> for FunctionType {
     }
 }
 
-
 impl Type {
     pub fn is_arithmetic(&self) -> bool {
         match self {
@@ -332,7 +339,6 @@ impl Type {
             Type::Pointer(_) | Type::Array(_) | Type::Record(_) | Type::Function(_) => false,
         }
     }
-
 }
 
 impl BuiltinType {
@@ -346,15 +352,18 @@ impl BuiltinType {
     pub fn is_integer(&self) -> bool {
         matches!(
             self,
-            BuiltinType::Bool |
-            BuiltinType::UChar | BuiltinType::Char | BuiltinType::UShort |
-            BuiltinType::Short | BuiltinType::UInt | BuiltinType::Int |
-            BuiltinType::UInt64 | BuiltinType::Int64
+            BuiltinType::Bool
+                | BuiltinType::UChar
+                | BuiltinType::Char
+                | BuiltinType::UShort
+                | BuiltinType::Short
+                | BuiltinType::UInt
+                | BuiltinType::Int
+                | BuiltinType::UInt64
+                | BuiltinType::Int64
         )
     }
 }
-
-
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PointerType {
@@ -378,8 +387,8 @@ pub enum ArrayType {
 #[derive(Debug, PartialEq, Clone)]
 pub struct ConstantArrayType {
     pub element_type: Box<Type>,
-    pub size: i64,
-    pub size_info: Option<i64>,
+    pub size: usize,
+    pub size_info: Option<Box<Expr>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -450,12 +459,14 @@ impl Type {
             (Type::Array(array_self), Type::Array(array_other)) => {
                 match (array_self, array_other) {
                     (ArrayType::Constant(const_self), ArrayType::Constant(const_other)) => {
-                        const_self.element_type.can_assign_from(&*const_other.element_type)
+                        const_self
+                            .element_type
+                            .can_assign_from(&*const_other.element_type)
                             && const_self.size == const_other.size
                     }
-                    (ArrayType::Incomplete(inc_self), ArrayType::Incomplete(inc_other)) => {
-                        inc_self.element_type.can_assign_from(&*inc_other.element_type)
-                    }
+                    (ArrayType::Incomplete(inc_self), ArrayType::Incomplete(inc_other)) => inc_self
+                        .element_type
+                        .can_assign_from(&*inc_other.element_type),
                     _ => false,
                 }
             }
@@ -465,7 +476,9 @@ impl Type {
             }
             // Function types can be assigned from compatible Function types
             (Type::Function(func_self), Type::Function(func_other)) => {
-                func_self.return_type.can_assign_from(&*func_other.return_type)
+                func_self
+                    .return_type
+                    .can_assign_from(&*func_other.return_type)
                     && func_self.param_count == func_other.param_count
                     && func_self
                         .param_types

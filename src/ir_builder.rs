@@ -134,7 +134,7 @@ impl Builder {
             InitVal::Array(array_init_val) => {
                 let _ty = Type::Array(ArrayType::Constant(ConstantArrayType {
                     element_type: Box::new(type_.clone()), // Replace with the correct element type
-                    size: array_init_val.0.len() as i64,
+                    size: array_init_val.0.len() as usize,
                     size_info: None,
                 }));
 

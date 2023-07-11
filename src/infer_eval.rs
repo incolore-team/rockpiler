@@ -1,8 +1,6 @@
-
-
+use crate::ast::*;
 use crate::scope::SymbolTable;
 use crate::symbol::Symbol;
-use crate::{ast::*};
 
 pub trait InferEvaluator {
     fn infer_type(&self, syms: &SymbolTable) -> Option<Type>;
@@ -60,7 +58,6 @@ impl Literal {
         }
     }
 }
-
 
 impl InferEvaluator for InfixExpr {
     fn infer_type(&self, syms: &SymbolTable) -> Option<Type> {
@@ -190,9 +187,7 @@ impl InferEvaluator for PostfixExpr {
 
         match &self.op {
             PostfixOp::Incr | PostfixOp::Decr => self.infer_type_incr_decr(&lhs_type),
-            PostfixOp::CallAccess(call) => {
-                self.infer_type_call_access(&lhs_type, &call)
-            }
+            PostfixOp::CallAccess(call) => self.infer_type_call_access(&lhs_type, &call),
             PostfixOp::DotAccess(dot) => self.infer_type_dot_access(&lhs_type, &dot),
             PostfixOp::IndexAccess(IndexAccess { index }) => {
                 self.infer_type_index_access(&lhs_type, &index)
@@ -244,8 +239,6 @@ impl PostfixExpr {
     fn infer_type_index_access(&self, _lhs_type: &Type, _index: &Box<Expr>) -> Option<Type> {
         unimplemented!()
     }
-    
-    
 
     fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal> {
         let lhs_val = self.lhs.eval_literal(syms)?;
@@ -306,7 +299,6 @@ impl InferEvaluator for CallExpr {
     }
 }
 
-
 impl InferEvaluator for IdentExpr {
     fn infer_type(&self, syms: &SymbolTable) -> Option<Type> {
         if let Some(Symbol::Var(var_sym)) = syms.resolve_symbol(&self.id) {
@@ -329,7 +321,7 @@ impl InferEvaluator for IdentExpr {
     }
 }
 
-impl InferEvaluator for InitVal{
+impl InferEvaluator for InitVal {
     fn infer_type(&self, syms: &SymbolTable) -> Option<Type> {
         match self {
             InitVal::Expr(expr) => expr.infer_type(syms),
@@ -344,7 +336,6 @@ impl InferEvaluator for InitVal{
         }
     }
 }
-
 
 // impl InferEvaluator for DerefExpr {
 //     fn infer_type(&self, syms: &SymbolTable) -> Option<Type> {
@@ -369,9 +360,9 @@ impl InferEvaluator for Literal {
             Literal::Char(_) => Type::Builtin(BuiltinType::Char),
             Literal::Int(_) => Type::Builtin(BuiltinType::Int),
             Literal::Float(_) => Type::Builtin(BuiltinType::Float),
-            Literal::String(_) => Type::Pointer(
-                PointerType { type_: Box::new(Type::Builtin(BuiltinType::Char)) }
-            ),
+            Literal::String(_) => Type::Pointer(PointerType {
+                type_: Box::new(Type::Builtin(BuiltinType::Char)),
+            }),
         })
     }
 
