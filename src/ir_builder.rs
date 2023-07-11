@@ -330,14 +330,20 @@ impl Builder {
     }
      */
     pub fn build_for_statement(&mut self, for_stmt: &ForStmt) {
-        let init_value = for_stmt.init.as_ref().map(|init| self.build_expr(init, false));
+        let init_value = for_stmt
+            .init
+            .as_ref()
+            .map(|init| self.build_expr(init, false));
 
         let cond_bb = self.build_basic_block();
         let body_bb = self.build_basic_block();
         let end_bb = self.build_basic_block();
 
         self.set_insert_point(cond_bb);
-        let cond_value = for_stmt.cond.as_ref().map(|cond| self.build_expr(cond, false));
+        let cond_value = for_stmt
+            .cond
+            .as_ref()
+            .map(|cond| self.build_expr(cond, false));
         if let Some(cond_value) = cond_value {
             self.build_br_inst(cond_value, body_bb, end_bb);
         } else {
@@ -356,7 +362,10 @@ impl Builder {
     }
 
     pub fn build_return_statement(&mut self, return_stmt: &ReturnStmt) {
-        let value = return_stmt.expr.as_ref().map(|expr| self.build_expr(expr, false));
+        let value = return_stmt
+            .expr
+            .as_ref()
+            .map(|expr| self.build_expr(expr, false));
         self.build_return_inst(value);
     }
 
@@ -403,7 +412,6 @@ impl Builder {
                 let val_id = self.alloc_value(bin_op.into());
                 self.cur_bb_mut().insts.push_back(val_id);
                 val_id // returns the binary operator value id
-
             }
             Expr::Prefix(prefix_expr) => {
                 let rhs = self.build_expr(&prefix_expr.rhs, false);
@@ -461,7 +469,7 @@ impl Builder {
                     };
                     let val_id = self.alloc_value(call_inst.into());
                     self.cur_bb_mut().insts.push_back(val_id);
-                    val_id // 
+                    val_id //
                 }
                 PrimaryExpr::Ident(ident_expr) => {
                     /*
@@ -484,6 +492,7 @@ impl Builder {
             },
         }
     }
+
     fn spawn_load_inst(&mut self, src: ValueId) -> ValueId {
         let load_inst = LoadInst {
             ty: self.module.values.get(src).unwrap().ty(),
@@ -493,6 +502,7 @@ impl Builder {
         self.cur_bb_mut().insts.push_back(val_id);
         val_id
     }
+
     fn build_literal(&mut self, literal: &Literal) -> ValueId {
         match literal {
             Literal::Int(int) => {
