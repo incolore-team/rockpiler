@@ -3,7 +3,9 @@ use crate::scope::SymbolTable;
 use crate::symbol::Symbol;
 
 pub trait InferEvaluator {
+    // 类型推导
     fn infer_type(&self, syms: &SymbolTable) -> Option<Type>;
+    // 常量表达式求值
     fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal>;
 }
 
@@ -237,7 +239,12 @@ impl PostfixExpr {
     }
 
     fn infer_type_index_access(&self, _lhs_type: &Type, _index: &Box<Expr>) -> Option<Type> {
-        unimplemented!()
+        // 如果对一个类型进行索引访问，则返回该类型的元素类型
+        if let Type::Array(arr_ty) = _lhs_type {
+            Some(arr_ty.element_type().clone())
+        } else {
+            panic!("index access on non-array type")
+        }
     }
 
     fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal> {

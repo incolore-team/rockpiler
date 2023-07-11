@@ -41,11 +41,11 @@ pub enum InfixOp {
 }
 #[derive(Debug, PartialEq, Clone)]
 pub enum PostfixOp {
-    Incr,
-    Decr,
-    CallAccess(CallAccess),
-    DotAccess(DotAccess),
-    IndexAccess(IndexAccess),
+    Incr, // ++
+    Decr, // --
+    CallAccess(CallAccess), // (args...)
+    DotAccess(DotAccess), // .field
+    IndexAccess(IndexAccess), // [index]
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -382,6 +382,15 @@ impl PointerType {
 pub enum ArrayType {
     Constant(ConstantArrayType),
     Incomplete(IncompleteArrayType),
+}
+
+impl ArrayType {
+    pub fn element_type(&self) -> &Type {
+        match self {
+            ArrayType::Constant(array_type) => &array_type.element_type,
+            ArrayType::Incomplete(array_type) => &array_type.element_type,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]

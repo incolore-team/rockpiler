@@ -9,7 +9,7 @@ pub fn drive(args: Args) {
         let src = std::fs::read_to_string(f_input).expect("unable to read file");
         trace!("================== SRC => AST ==================");
         let ast = crate::parser::parse(&src);
-        trace!("ast: {:?}", ast);
+        trace!("ast: {:#?}", ast);
         if ast.as_ref().err().is_some() {
             panic!("unable to parse file");
         }
@@ -18,7 +18,7 @@ pub fn drive(args: Args) {
         let mut ast = ast.unwrap();
         ast.to_sema(&mut syms);
         trace!("syms: \n{}", syms.print_table());
-        trace!("ast: {:?}", ast);
+        trace!("ast: {:#?}", ast);
         trace!("================== SEMA+AST => Pre-SSA IR ==================");
         let mut module = crate::ir_builder::build(&mut ast, syms);
         inst_namer::run(&mut module);
