@@ -25,6 +25,7 @@ pub struct Module {
 
     pub global_variables: LinkedHashMap<String, ValueId>,
     pub syms: SymbolTable,
+    // 一般存放符号对应的 alloca 语句 value id，或者全局变量 valud id
     pub sym2def: LinkedHashMap<SymbolId, ValueId>,
     pub functions: LinkedHashMap<String, ValueId>,
     pub builtins: LinkedHashMap<String, ValueId>,

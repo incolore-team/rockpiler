@@ -151,7 +151,11 @@ impl<'a> Printer<'a> {
     }
 
     pub fn print_alloca_inst(&self, val_id: &ValueId, inst: &AllocaInst) {
-        print!("{} = alloca {}", self.resolve_name(val_id), self.format_type(&inst.ty));
+        print!(
+            "{} = alloca {}",
+            self.resolve_name(val_id),
+            self.format_type(&inst.ty)
+        );
         println!();
     }
 
@@ -165,7 +169,7 @@ impl<'a> Printer<'a> {
 
     pub fn format_value(&mut self, val_id: &ValueId, val: &Value) -> String {
         match val {
-            Value::GlobalVariable(g_val) => todo!(),
+            Value::GlobalVariable(_) => self.resolve_name(val_id),
             Value::Function(_) => todo!(),
             Value::BasicBlock(_) => todo!(),
             // Value::Instruction(inst) => self.format_inst(val_id, inst),
@@ -206,11 +210,7 @@ impl<'a> Printer<'a> {
 
     pub fn format_alloca_inst(&mut self, val_id: &ValueId, inst: &AllocaInst) -> String {
         let ret = self.resolve_name(val_id);
-        print!(
-            "{} = alloca {}",
-            ret,
-            self.format_type(&inst.ty)
-        );
+        print!("{} = alloca {}", ret, self.format_type(&inst.ty));
         println!();
         ret
     }

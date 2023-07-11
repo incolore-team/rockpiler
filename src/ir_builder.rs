@@ -99,6 +99,13 @@ impl Builder {
 
         self.cur_func = Some(function_id);
 
+        for param in &func_decl.params {
+            let alloca_id = self.spawn_alloca_inst(param.name.clone(), param.type_.clone());
+            self.module
+                .sym2def
+                .insert(param.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
+        }
+
         for stmt in &func_decl.body.stmts {
             self.build_statement(stmt);
         }
@@ -181,12 +188,7 @@ impl Builder {
 
     pub fn build_var_decls_statement(&mut self, var_decls_stmt: &VarDecls) {
         for decl in &var_decls_stmt.decls {
-            let alloca = AllocaInst {
-                ty: self.build_type(&decl.type_),
-                name: decl.name.clone(),
-            };
-            let alloca_id = self.alloc_value(alloca.into());
-            self.cur_bb_mut().insts.push_back(alloca_id);
+            let alloca_id = self.spawn_alloca_inst(decl.name.clone(), decl.type_.clone());
             match &decl.init {
                 Some(init_val) => {
                     let init_val_id = self.build_init_val(init_val, &decl.type_);
@@ -207,6 +209,13 @@ impl Builder {
                 }
             }
         }
+    }
+
+    pub fn spawn_alloca_inst(&mut self, name: String, ty: Type) -> ValueId {
+        let alloca = AllocaInst { name, ty };
+        let alloca_id = self.alloc_value(alloca.into());
+        self.cur_bb_mut().insts.push_back(alloca_id);
+        alloca_id
     }
 
     pub fn build_if_statement(&mut self, if_stmt: &IfElseStmt) {
@@ -476,6 +485,14 @@ impl Builder {
                     为了区分不同作用域中的相同名称的变量，可以在构建 IR 时为每个作用域的变量创建不同的名称。
                      */
                     let sym_id = ident_expr.sema_ref.as_ref().unwrap().symbol_id;
+                    if self.module.sym2def.get(&sym_id).is_none() {
+                        panic!(
+                            "missing symbol definition for {} symbol id: {:?}, symbol: {:?}",
+                            ident_expr.id,
+                            sym_id,
+                            self.module.syms.resolve_symbol_by_id(sym_id)
+                        );
+                    }
                     let _symbol = self.module.syms.resolve_symbol_by_id(sym_id);
                     // log::debug!("sym_id: {:?}, _symbol: {:?}", sym_id, _symbol);
                     // log::debug!("sym2def: {:?}", self.module.sym2def);
