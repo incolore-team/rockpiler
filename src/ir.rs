@@ -452,8 +452,8 @@ impl Into<Value> for LoadInst {
 /// store <ty> <value>, <ty>* <pointer>
 #[derive(Debug, Clone)]
 pub struct StoreInst {
-    pub src: ValueId,
-    pub dst: ValueId,
+    pub value: ValueId,
+    pub ptr: ValueId,
 }
 
 impl Into<Value> for StoreInst {

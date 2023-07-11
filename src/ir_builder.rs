@@ -130,7 +130,7 @@ impl Builder {
     }
     pub fn build_init_val(&mut self, init_val: &InitVal, type_: &Type) -> ValueId {
         match init_val {
-            InitVal::Expr(expr) => self.build_expr(expr),
+            InitVal::Expr(expr) => self.build_expr(expr, false),
             InitVal::Array(array_init_val) => {
                 let _ty = Type::Array(ArrayType::Constant(ConstantArrayType {
                     element_type: Box::new(type_.clone()), // Replace with the correct element type
@@ -191,8 +191,8 @@ impl Builder {
                 Some(init_val) => {
                     let init_val_id = self.build_init_val(init_val, &decl.type_);
                     let store_inst = StoreInst {
-                        src: init_val_id,
-                        dst: alloca_id,
+                        value: init_val_id,
+                        ptr: alloca_id,
                     };
                     let store_id = self.alloc_value(store_inst.into());
                     self.cur_bb_mut().insts.push_back(store_id);
@@ -210,7 +210,7 @@ impl Builder {
     }
 
     pub fn build_if_statement(&mut self, if_stmt: &IfElseStmt) {
-        let condition = self.build_expr(&if_stmt.cond);
+        let condition = self.build_expr(&if_stmt.cond, false);
         todo!()
     }
     /*
@@ -250,7 +250,7 @@ impl Builder {
         let end_bb = self.build_basic_block();
 
         self.set_insert_point(cond_bb);
-        let cond_value = self.build_expr(&while_stmt.cond);
+        let cond_value = self.build_expr(&while_stmt.cond, false);
         self.build_br_inst(cond_value, body_bb, end_bb);
 
         self.set_insert_point(body_bb);
@@ -330,14 +330,14 @@ impl Builder {
     }
      */
     pub fn build_for_statement(&mut self, for_stmt: &ForStmt) {
-        let init_value = for_stmt.init.as_ref().map(|init| self.build_expr(init));
+        let init_value = for_stmt.init.as_ref().map(|init| self.build_expr(init, false));
 
         let cond_bb = self.build_basic_block();
         let body_bb = self.build_basic_block();
         let end_bb = self.build_basic_block();
 
         self.set_insert_point(cond_bb);
-        let cond_value = for_stmt.cond.as_ref().map(|cond| self.build_expr(cond));
+        let cond_value = for_stmt.cond.as_ref().map(|cond| self.build_expr(cond, false));
         if let Some(cond_value) = cond_value {
             self.build_br_inst(cond_value, body_bb, end_bb);
         } else {
@@ -350,13 +350,13 @@ impl Builder {
         let _ = for_stmt
             .update
             .as_ref()
-            .map(|update| self.build_expr(update));
+            .map(|update| self.build_expr(update, false));
 
         self.build_jump_inst(cond_bb);
     }
 
     pub fn build_return_statement(&mut self, return_stmt: &ReturnStmt) {
-        let value = return_stmt.expr.as_ref().map(|expr| self.build_expr(expr));
+        let value = return_stmt.expr.as_ref().map(|expr| self.build_expr(expr, false));
         self.build_return_inst(value);
     }
 
@@ -369,26 +369,28 @@ impl Builder {
 
     pub fn build_expression_statement(&mut self, expr_stmt: &ExprStmt) {
         if let Some(expr) = &expr_stmt.expr {
-            self.build_expr(expr);
+            self.build_expr(expr, false);
         }
     }
-    pub fn build_expr(&mut self, expr: &Box<Expr>) -> ValueId {
+
+    pub fn spawn_store_inst(&mut self, ptr: ValueId, value: ValueId) -> ValueId {
+        let store = StoreInst { ptr, value };
+        let store_id = self.alloc_value(store.into());
+        self.cur_bb_mut().insts.push_back(store_id);
+        store_id
+    }
+
+    // is_lval 表示是否是左值表达式，如果是，则不需要生成 LoadInst
+    pub fn build_expr(&mut self, expr: &Box<Expr>, is_lval: bool) -> ValueId {
         let expr = &**expr;
         match expr {
             Expr::Infix(infix_expr) => {
-                let lhs = self.build_expr(&infix_expr.lhs);
-                let rhs = self.build_expr(&infix_expr.rhs);
+                let is_assign = infix_expr.op == InfixOp::Assign;
+                let lhs = self.build_expr(&infix_expr.lhs, is_assign);
+                let rhs = self.build_expr(&infix_expr.rhs, false);
 
-                if infix_expr.op == InfixOp::Assign {
-                    let assign = StoreInst { src: rhs, dst: lhs };
-                    let assign_id = self.alloc_value(assign.into());
-                    self.cur_bb_mut().insts.push_back(assign_id);
-                    if let Expr::Primary(PrimaryExpr::Ident(ident_expr)) = infix_expr.lhs.as_ref() {
-                        self.module
-                            .sym2def
-                            .insert(ident_expr.sema_ref.as_ref().unwrap().symbol_id, assign_id);
-                    }
-                    return assign_id;
+                if is_assign {
+                    return self.spawn_store_inst(lhs, rhs);
                 }
 
                 let bin_op = BinaryOperator {
@@ -400,11 +402,11 @@ impl Builder {
 
                 let val_id = self.alloc_value(bin_op.into());
                 self.cur_bb_mut().insts.push_back(val_id);
-                val_id
+                val_id // returns the binary operator value id
 
             }
             Expr::Prefix(prefix_expr) => {
-                let rhs = self.build_expr(&prefix_expr.rhs);
+                let rhs = self.build_expr(&prefix_expr.rhs, false);
                 let op = match prefix_expr.op {
                     PrefixOp::Incr => InfixOp::Add,
                     PrefixOp::Decr => InfixOp::Sub,
@@ -420,10 +422,10 @@ impl Builder {
                 };
                 let val_id = self.alloc_value(bin_op.into());
                 self.cur_bb_mut().insts.push_back(val_id);
-                val_id
+                val_id // returns the binary operator value id
             }
             Expr::Postfix(postfix_expr) => {
-                let _lhs = self.build_expr(&postfix_expr.lhs);
+                let _lhs = self.build_expr(&postfix_expr.lhs, false);
                 let _op = match postfix_expr.op {
                     PostfixOp::Incr => InfixOp::Add,
                     PostfixOp::Decr => InfixOp::Sub,
@@ -440,7 +442,7 @@ impl Builder {
                 todo!()
             }
             Expr::Primary(primary_expr) => match primary_expr {
-                PrimaryExpr::Group(expr) => self.build_expr(expr),
+                PrimaryExpr::Group(expr) => self.build_expr(expr, false),
                 PrimaryExpr::Call(call_expr) => {
                     let func_id = self.module.functions.get(&call_expr.id).unwrap().clone();
                     let args = call_expr
@@ -449,7 +451,7 @@ impl Builder {
                         .map(|arg| arg.clone()) // 克隆 arg，以便在迭代之外使用
                         .collect::<Vec<_>>(); // 将结果收集到一个临时的 Vec 中
 
-                    let args = args.into_iter().map(|arg| self.build_expr(&arg)); // 使用临时 Vec 构建表达式，避免多次借用 self
+                    let args = args.into_iter().map(|arg| self.build_expr(&arg, false)); // 使用临时 Vec 构建表达式，避免多次借用 self
                     let args = args.collect::<Vec<_>>(); // 将结果收集到一个临时的 Vec 中
                     let func_value = self.module.values.get(func_id).unwrap();
                     let call_inst = CallInst {
@@ -459,7 +461,7 @@ impl Builder {
                     };
                     let val_id = self.alloc_value(call_inst.into());
                     self.cur_bb_mut().insts.push_back(val_id);
-                    val_id
+                    val_id // 
                 }
                 PrimaryExpr::Ident(ident_expr) => {
                     /*
@@ -470,20 +472,27 @@ impl Builder {
                     // log::debug!("sym_id: {:?}, _symbol: {:?}", sym_id, _symbol);
                     // log::debug!("sym2def: {:?}", self.module.sym2def);
                     let var_val_id = self.module.sym2def.get(&sym_id).unwrap().clone();
-                    let load_inst = LoadInst {
-                        ty: self.module.values.get(var_val_id).unwrap().ty(),
-                        src: var_val_id,
-                    };
-
-                    let val_id = self.alloc_value(load_inst.into());
-                    self.cur_bb_mut().insts.push_back(val_id);
-                    val_id
+                    // 例如接下来要对变量进行赋值，那么就不需要 load。
+                    // 如果接下来要使用变量进行运算等，则需要 load。
+                    if is_lval {
+                        var_val_id
+                    } else {
+                        self.spawn_load_inst(var_val_id)
+                    }
                 }
                 PrimaryExpr::Literal(literal) => self.build_literal(literal),
             },
         }
     }
-
+    fn spawn_load_inst(&mut self, src: ValueId) -> ValueId {
+        let load_inst = LoadInst {
+            ty: self.module.values.get(src).unwrap().ty(),
+            src,
+        };
+        let val_id = self.alloc_value(load_inst.into());
+        self.cur_bb_mut().insts.push_back(val_id);
+        val_id
+    }
     fn build_literal(&mut self, literal: &Literal) -> ValueId {
         match literal {
             Literal::Int(int) => {

@@ -84,14 +84,14 @@ impl<'a> Printer<'a> {
     }
 
     pub fn print_store_inst(&mut self, inst: &StoreInst) {
-        let src_val = Value::resolve(inst.src, self.module);
-        let dst_val = Value::resolve(inst.dst, self.module);
+        let src_val = Value::resolve(inst.value, self.module);
+        let dst_val = Value::resolve(inst.ptr, self.module);
         let ty = Value::ty(dst_val);
         print!(
             "store {} {}, ptr {}",
             self.format_type(&ty),
-            self.format_value(&inst.src, src_val),
-            self.format_value(&inst.dst, dst_val)
+            self.format_value(&inst.value, src_val),
+            self.format_value(&inst.ptr, dst_val)
         );
         println!();
     }
@@ -146,7 +146,7 @@ impl<'a> Printer<'a> {
             InfixOp::LogicAnd => todo!(),
             InfixOp::LogicOr => todo!(),
             InfixOp::Mod => todo!(),
-            InfixOp::Assign => todo!(),
+            InfixOp::Assign => unreachable!("assign should be built as a StoreInst"),
         }
     }
 
@@ -217,14 +217,14 @@ impl<'a> Printer<'a> {
 
     pub fn format_store_inst(&mut self, val_id: &ValueId, inst: &StoreInst) -> String {
         let ret = self.resolve_name(val_id);
-        let src_val = Value::resolve(inst.src, self.module);
-        let dst_val = Value::resolve(inst.dst, self.module);
+        let src_val = Value::resolve(inst.value, self.module);
+        let dst_val = Value::resolve(inst.ptr, self.module);
         print!(
             "{} = store {} {}, {}",
             ret,
             self.format_type(&Value::ty(src_val)),
-            self.format_value(&inst.src, src_val),
-            self.format_value(&inst.dst, dst_val)
+            self.format_value(&inst.value, src_val),
+            self.format_value(&inst.ptr, dst_val)
         );
         println!();
         ret
