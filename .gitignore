@@ -2,3 +2,4 @@
 target/
 a.out
 build
+*.tmp.*
