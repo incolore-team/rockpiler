@@ -75,7 +75,7 @@ impl<'a> Printer<'a> {
             InstValue::Alloca(inst) => self.print_alloca_inst(val_id, inst),
             InstValue::Branch(_) => todo!(),
             InstValue::Jump(_) => todo!(),
-            InstValue::Gep(_) => todo!(),
+            InstValue::Gep(inst) => self.print_gep_inst(val_id, inst),
             InstValue::Return(inst) => self.print_ret_inst(val_id, inst),
             InstValue::Call(_) => todo!(),
             InstValue::Phi(_) => todo!(),
@@ -83,10 +83,33 @@ impl<'a> Printer<'a> {
         }
     }
 
+    pub fn print_gep_inst(&mut self, val_id: &ValueId, inst: &GetElementPtrInst) {
+        let ptr_val = Value::resolve(inst.pointer, self.module);
+        let index_vals: Vec<_> = inst
+            .indices
+            .iter()
+            .map(|id| Value::resolve(*id, self.module))
+            .collect();
+
+        print!(
+            "{} = getelementptr {}, ptr {}",
+            self.resolve_name(&val_id),
+            self.format_type(&inst.ty),
+            self.format_value(&inst.pointer, ptr_val)
+        );
+        for i in 0..index_vals.len() {
+            print!(
+                ", i32 {}",
+                self.format_value(&inst.indices[i], index_vals[i])
+            );
+        }
+        println!();
+    }
+
     pub fn print_store_inst(&mut self, inst: &StoreInst) {
         let src_val = Value::resolve(inst.value, self.module);
         let dst_val = Value::resolve(inst.ptr, self.module);
-        let ty = Value::ty(dst_val);
+        let ty = Value::ty(src_val);
         print!(
             "store {} {}, ptr {}",
             self.format_type(&ty),

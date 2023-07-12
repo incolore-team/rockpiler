@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::sema::SemaRef;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -41,10 +43,10 @@ pub enum InfixOp {
 }
 #[derive(Debug, PartialEq, Clone)]
 pub enum PostfixOp {
-    Incr, // ++
-    Decr, // --
-    CallAccess(CallAccess), // (args...)
-    DotAccess(DotAccess), // .field
+    Incr,                     // ++
+    Decr,                     // --
+    CallAccess(CallAccess),   // (args...)
+    DotAccess(DotAccess),     // .field
     IndexAccess(IndexAccess), // [index]
 }
 
