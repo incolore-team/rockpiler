@@ -15,3 +15,4 @@ pub mod scope;
 pub mod sema;
 pub mod symbol;
 pub mod pass;
+pub mod util;

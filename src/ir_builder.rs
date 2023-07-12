@@ -1,4 +1,6 @@
-use crate::{ast::*, ir::*, scope::*};
+use std::clone;
+
+use crate::{ast::*, ir::*, scope::*, util::Insertable};
 
 pub fn build(ast: &mut TransUnit, syms: SymbolTable) -> Module {
     let mut builder = Builder::new(syms);
@@ -99,13 +101,18 @@ impl Builder {
 
         self.cur_func = Some(function_id);
 
+        let mut index = 0;
         for param in &func_decl.params {
             let alloca_id = self.spawn_alloca_inst(param.name.clone(), param.type_.clone());
             self.module
                 .sym2def
                 .insert(param.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
-        }
 
+            // store param to allocated mem
+            let param_value = self.cur_func().params[index];
+            self.spawn_store_inst(alloca_id, param_value);
+            index += 1;
+        }
         for stmt in &func_decl.body.stmts {
             self.build_statement(stmt);
         }
@@ -214,7 +221,27 @@ impl Builder {
     pub fn spawn_alloca_inst(&mut self, name: String, ty: Type) -> ValueId {
         let alloca = AllocaInst { name, ty };
         let alloca_id = self.alloc_value(alloca.into());
-        self.cur_bb_mut().insts.push_back(alloca_id);
+        let entry_bb_id = self.cur_func().bbs.entry_bb();
+
+        // 用于确定插入位置的临时变量
+        let ins_pos;
+
+        // 使用一个新的作用域来查找插入位置
+        {
+            let entry_bb = self.module.get_bb(entry_bb_id.clone());
+            ins_pos = entry_bb
+                .insts
+                .iter()
+                .position(|inst_id| {
+                    !matches!(self.module.get_inst(inst_id.clone()), InstValue::Alloca(_))
+                })
+                .unwrap_or_else(|| entry_bb.insts.len());
+        }
+
+        // 在找到的位置插入新的alloca指令
+        let entry_bb_mut = self.module.get_bb_mut(entry_bb_id.clone());
+        entry_bb_mut.insts.insert(ins_pos, alloca_id);
+
         alloca_id
     }
 
@@ -473,7 +500,7 @@ impl Builder {
                     let func_value = self.module.values.get(func_id).unwrap();
                     let call_inst = CallInst {
                         ty: func_value.ty(),
-                        callee: func_id.clone(),
+                        func: func_id.clone(),
                         args,
                     };
                     let val_id = self.alloc_value(call_inst.into());

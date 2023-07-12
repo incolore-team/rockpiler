@@ -191,6 +191,14 @@ impl BasicBlockList {
     pub fn append_with_name(&mut self, bb_id: ValueId, name: String) {
         self.bbs.insert(name, bb_id);
     }
+
+    pub fn entry_bb(&self) -> &ValueId {
+        self.bbs.get("entry").unwrap()
+    }
+
+    pub fn entry_bb_mut(&mut self) -> &mut ValueId {
+        self.bbs.get_mut("entry").unwrap()
+    }
 }
 
 impl FunctionValue {}
@@ -397,7 +405,7 @@ impl Into<Value> for BinaryOperator {
 #[derive(Debug, Clone)]
 pub struct CallInst {
     pub ty: Type,
-    pub callee: ValueId,
+    pub func: ValueId,
     pub args: Vec<ValueId>,
 }
 

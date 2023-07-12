@@ -49,7 +49,11 @@ impl<'a> Printer<'a> {
             if i != 0 {
                 println!(", ");
             }
-            print!("{} {}", self.format_type(&arg.ty), arg.name);
+            print!(
+                "{} {}",
+                self.format_type(&arg.ty),
+                self.resolve_name(arg_value_id)
+            );
         }
         println!(") {{");
         for (bb_name, bb_val_id) in &func.bbs.bbs {
@@ -77,10 +81,32 @@ impl<'a> Printer<'a> {
             InstValue::Jump(_) => todo!(),
             InstValue::Gep(_) => todo!(),
             InstValue::Return(inst) => self.print_ret_inst(val_id, inst),
-            InstValue::Call(_) => todo!(),
+            InstValue::Call(inst) => self.print_call_inst(val_id, inst),
             InstValue::Phi(_) => todo!(),
             InstValue::Cast(_) => todo!(),
         }
+    }
+
+    pub fn print_call_inst(&mut self, val_id: &ValueId, inst: &CallInst) {
+        let func = Value::resolve(inst.func, self.module);
+        let func_name = match func {
+            Value::Function(func) => func.name.clone(),
+            _ => panic!("{} is not a function", self.format_value(&inst.func, func)),
+        };
+        print!(
+            "{} = call {} @{}(",
+            self.resolve_name(&val_id),
+            self.format_type(&Value::ty(func)),
+            func_name
+        );
+        for (i, arg) in inst.args.iter().enumerate() {
+            let arg_val = Value::resolve(*arg, self.module);
+            if i != 0 {
+                print!(", ");
+            }
+            print!("{}", self.format_value(arg, arg_val));
+        }
+        println!(")");
     }
 
     pub fn print_store_inst(&mut self, inst: &StoreInst) {
@@ -175,7 +201,7 @@ impl<'a> Printer<'a> {
             // Value::Instruction(inst) => self.format_inst(val_id, inst),
             Value::Instruction(inst) => self.resolve_name(val_id),
             Value::Const(c) => self.format_const(c),
-            Value::VariableValue(_) => todo!(),
+            Value::VariableValue(_) => self.resolve_name(val_id),
         }
     }
 

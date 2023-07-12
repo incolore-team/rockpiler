@@ -37,10 +37,24 @@ impl InstNamer<'_> {
     }
 
     pub fn visit_function(&mut self, func_val_id: ValueId) {
-        self.next_id = 1;
+        self.next_id = 0;
+
+        self.visit_params(func_val_id);
+
+        self.next_id += 1;
+
         let func = self.module.get_func(func_val_id);
+
         for (_, block_val_id) in &func.bbs.bbs.clone() {
             self.visit_bb(*block_val_id);
+        }
+    }
+
+    pub fn visit_params(&mut self, func_val_id: ValueId) {
+        let func = self.module.get_func(func_val_id);
+        for param_val_id in &func.params.clone() {
+            let name = self.generate_local_name();
+            self.assign(*param_val_id, name);
         }
     }
 
