@@ -451,16 +451,19 @@ impl Builder {
             }
             Expr::Prefix(prefix_expr) => {
                 let rhs = self.build_expr(&prefix_expr.rhs, false);
-                let op = match prefix_expr.op {
-                    PrefixOp::Incr => InfixOp::Add,
-                    PrefixOp::Decr => InfixOp::Sub,
-                    _ => todo!(),
+                let converted_infix_op = match prefix_expr.op {
+                    PrefixOp::Incr => todo!(),
+                    PrefixOp::Decr => todo!(),
+                    PrefixOp::Not => todo!(),
+                    PrefixOp::BitNot => todo!(),
+                    PrefixOp::Pos => InfixOp::Add,
+                    PrefixOp::Neg => InfixOp::Sub,
                 };
                 let zero = ConstValue::zero_of(prefix_expr.infer_ty.as_ref().unwrap().clone());
                 let zero_id = self.alloc_value(zero.into());
                 let bin_op = BinaryOperator {
                     ty: prefix_expr.infer_ty.as_ref().unwrap().clone(),
-                    op,
+                    op: converted_infix_op,
                     lhs: zero_id,
                     rhs,
                 };

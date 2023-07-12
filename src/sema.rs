@@ -135,6 +135,7 @@ impl ToSemaTrait for InfixExpr {
 impl ToSemaTrait for PrefixExpr {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.rhs.to_sema(symbol_table);
+        self.infer_ty = self.infer_type(&symbol_table);
     }
 }
 
@@ -147,6 +148,7 @@ impl ToSemaTrait for PostfixExpr {
             PostfixOp::DotAccess(dot_access) => dot_access.to_sema(symbol_table),
             PostfixOp::IndexAccess(index_access) => index_access.to_sema(symbol_table),
         }
+        self.infer_ty = self.infer_type(&symbol_table);
     }
 }
 
