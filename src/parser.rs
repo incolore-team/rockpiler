@@ -6,7 +6,7 @@ use pest::{
     Parser,
 };
 
-use crate::ast::*;
+use crate::{ast::*, ir::ValueId};
 type ParseResult<T> = Result<T, Box<ParseError<Rule>>>;
 
 trait IntoParseResult<T> {
@@ -118,7 +118,7 @@ pub fn parse_grammar(pair: Pair<Rule>) -> ParseResult<TransUnit> {
     parse_trans_unit(tu)
 }
 
-// trans_unit = { (func_decl | var_decls)* }
+// trans_unit = { (func_decl | var_decls | func_proto)* }
 pub fn parse_trans_unit(pair: Pair<Rule>) -> ParseResult<TransUnit> {
     _debug_rule("parse_trans_unit", &pair);
     let rhs = pair.into_inner();
@@ -128,6 +128,7 @@ pub fn parse_trans_unit(pair: Pair<Rule>) -> ParseResult<TransUnit> {
         match item.as_rule() {
             Rule::func_decl => func_decls.push(parse_func_decl(item)?),
             Rule::var_decls => var_decls.append(&mut parse_var_decls(item)?),
+            Rule::func_proto => func_decls.push(parse_func_decl(item)?),
             _ => unreachable!(),
         }
     }
@@ -249,6 +250,7 @@ pub fn parse_array_init_val(pair: Pair<Rule>) -> ParseResult<ArrayInitVal> {
 }
 
 // func_decl = { func_type ~ ID ~ "(" ~ (func_params)? ~ ")" ~ block }
+// func_proto = { func_type ~ ID ~ "(" ~ (func_params)? ~ ")" ~ ";" }
 pub fn parse_func_decl(pair: Pair<Rule>) -> ParseResult<FuncDecl> {
     _debug_rule("parse_func_decl", &pair);
     let mut inner = pair.into_inner();
@@ -269,7 +271,7 @@ pub fn parse_func_decl(pair: Pair<Rule>) -> ParseResult<FuncDecl> {
         name,
         params,
         ret_ty,
-        body: block.unwrap(),
+        body: block,
         sema_ref: None,
     })
 }
@@ -420,9 +422,9 @@ pub fn parse_if_stmt(pair: Pair<Rule>) -> ParseResult<IfElseStmt> {
     let stmt = parse_stmt(inner.next().unwrap())?;
     Ok(IfElseStmt {
         cond,
-        if_stmt: stmt,
+        then_stmt: stmt,
         else_if_conds: Vec::new(),
-        else_if_stmts: Vec::new(),
+        else_then_stmts: Vec::new(),
         else_stmt: None,
     })
 }
@@ -437,10 +439,10 @@ pub fn parse_if_else_stmt(pair: Pair<Rule>) -> ParseResult<IfElseStmt> {
     let else_stmt = Some(parse_stmt(inner.next().unwrap())?);
     Ok(IfElseStmt {
         cond,
-        if_stmt,
+        then_stmt: if_stmt,
         else_stmt,
         else_if_conds: Vec::new(),
-        else_if_stmts: Vec::new(),
+        else_then_stmts: Vec::new(),
     })
 }
 

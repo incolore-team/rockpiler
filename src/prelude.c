@@ -1,0 +1,1 @@
+int putint(int x);

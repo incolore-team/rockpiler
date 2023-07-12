@@ -1,5 +1,5 @@
 grammar = { SOI ~ trans_unit ~ EOI }
-trans_unit = { (func_decl | var_decls)* }
+trans_unit = { (func_decl | var_decls | func_proto)* }
 var_decls = { const_var_decls | normal_var_decls }
 basic_type = { KW_INT | KW_FLOAT }
 const_var_decls = { KW_CONST ~ basic_type ~ var_def ~ ("," ~ var_def)* ~ ";" }
@@ -19,20 +19,22 @@ func_decl = { func_type ~ id ~ "(" ~ (func_params)? ~ ")" ~ block }
     func_param = { basic_type ~ id ~ ("[" ~ "]" ~ ("[" ~ const_expr ~ "]")*)? }
     block = { "{" ~ (block_item)* ~ "}" }
 
+func_proto = { func_type ~ id ~ "(" ~ (func_params)? ~ ")" ~ ";" }
+
 const_expr = { expr }
 
 block_item = { var_decls | stmt }
 
 stmt = {
-    expr_stmt
+    break_stmt
+    | continue_stmt
+    | expr_stmt
     | block_stmt
     | if_else_stmt
     | if_stmt
     | while_stmt
     | for_stmt
-    | break_stmt
     | do_while_stmt
-    | continue_stmt
     | return_stmt
 }
 

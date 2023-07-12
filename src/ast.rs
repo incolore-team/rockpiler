@@ -1,11 +1,10 @@
 use std::collections::VecDeque;
 
-use crate::sema::SemaRef;
+use crate::{ir::ValueId, sema::SemaRef};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TransUnit {
     pub func_decls: Vec<FuncDecl>,
-
     pub var_decls: Vec<VarDecl>,
 }
 #[derive(Debug, PartialEq, Clone)]
@@ -75,9 +74,15 @@ pub struct FuncDecl {
     pub name: String,
     pub params: Vec<Param>,
     pub ret_ty: Type,
-    pub body: Block,
+    pub body: Option<Block>, // if none, this is only a function declaration, not a definition
 
     pub sema_ref: Option<SemaRef>,
+}
+
+impl FuncDecl {
+    pub fn is_external(&self) -> bool {
+        self.body.is_none()
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -154,15 +159,25 @@ pub struct ExprStmt {
 #[derive(Debug, PartialEq, Clone)]
 pub struct IfElseStmt {
     pub cond: Box<Expr>,
-    pub if_stmt: Box<Stmt>,
+    pub then_stmt: Box<Stmt>,
     pub else_if_conds: Vec<Box<Expr>>,
-    pub else_if_stmts: Vec<Box<Stmt>>,
+    pub else_then_stmts: Vec<Box<Stmt>>,
     pub else_stmt: Option<Box<Stmt>>,
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct WhileStmt {
     pub cond: Box<Expr>,
     pub body: Box<Stmt>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct BreakStmt {
+    pub target: Option<ValueId>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ContinueStmt {
+    pub target: Option<ValueId>,
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct ForStmt {

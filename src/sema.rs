@@ -47,7 +47,9 @@ impl ToSemaTrait for FuncDecl {
         }
 
         // 分析函数体
-        self.body.to_sema(symbol_table);
+        if let Some(body) = &mut self.body {
+            body.to_sema(symbol_table);
+        }
 
         // 离开函数作用域
         symbol_table.leave_scope();
@@ -135,6 +137,7 @@ impl ToSemaTrait for InfixExpr {
 impl ToSemaTrait for PrefixExpr {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.rhs.to_sema(symbol_table);
+        self.infer_ty = self.infer_type(&symbol_table);
     }
 }
 
@@ -147,6 +150,7 @@ impl ToSemaTrait for PostfixExpr {
             PostfixOp::DotAccess(dot_access) => dot_access.to_sema(symbol_table),
             PostfixOp::IndexAccess(index_access) => index_access.to_sema(symbol_table),
         }
+        self.infer_ty = self.infer_type(&symbol_table);
     }
 }
 
@@ -224,7 +228,7 @@ impl ToSemaTrait for ExprStmt {
 impl ToSemaTrait for IfElseStmt {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.cond.to_sema(symbol_table);
-        self.if_stmt.to_sema(symbol_table);
+        self.then_stmt.to_sema(symbol_table);
         if let Some(else_stmt) = &mut self.else_stmt {
             else_stmt.to_sema(symbol_table);
         }
