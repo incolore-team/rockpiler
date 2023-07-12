@@ -43,6 +43,11 @@ impl<'a> Printer<'a> {
 
     pub fn print_function(&mut self, name: &str, func_val_id: ValueId) {
         let func = self.module.get_func(func_val_id);
+        if func.bbs.bbs.len() == 0 {
+            self.print_external_function(name, func_val_id);
+            return;
+        }
+
         println!("define {} @{}(", self.format_type(&func.ret_ty), name);
         for (i, arg_value_id) in func.params.iter().enumerate() {
             let arg = FunctionValue::resolve_param(*arg_value_id, self.module);
@@ -62,9 +67,26 @@ impl<'a> Printer<'a> {
         println!("}}");
     }
 
+    pub fn print_external_function(&mut self, name: &str, func_val_id: ValueId) {
+        let func = self.module.get_func(func_val_id);
+        print!("declare {} @{}", self.format_type(&func.ret_ty), name);
+        print!("(");
+        for (i, arg_value_id) in func.params.iter().enumerate() {
+            let arg = FunctionValue::resolve_param(*arg_value_id, self.module);
+            if i != 0 {
+                print!(", ");
+            }
+            print!("{}", self.format_type(&arg.ty));
+        }
+        println!(")");
+    }
+
     pub fn print_block(&mut self, name: &str, bb_val_id: ValueId) {
-        let bb = self.module.get_bb(bb_val_id);
-        println!("{}:", name);
+        let bb = self.module.get_bb(bb_val_id.clone());
+        // println!("{}:", name);
+        if name != "entry" {
+            println!("{}:", self.resolve_name(&bb_val_id));
+        }
         for inst_val_id in &bb.insts {
             let inst = BasicBlockValue::resolve_inst(*inst_val_id, self.module);
             self.print_inst(inst_val_id, inst);
@@ -77,14 +99,27 @@ impl<'a> Printer<'a> {
             InstValue::Load(inst) => self.print_load_inst(val_id, inst),
             InstValue::Store(inst) => self.print_store_inst(inst),
             InstValue::Alloca(inst) => self.print_alloca_inst(val_id, inst),
-            InstValue::Branch(_) => todo!(),
-            InstValue::Jump(_) => todo!(),
+            InstValue::Branch(inst) => self.print_branch_inst(val_id, inst),
+            InstValue::Jump(inst) => self.print_jump_inst(val_id, inst),
             InstValue::Gep(_) => todo!(),
             InstValue::Return(inst) => self.print_ret_inst(val_id, inst),
             InstValue::Call(inst) => self.print_call_inst(val_id, inst),
             InstValue::Phi(_) => todo!(),
             InstValue::Cast(_) => todo!(),
         }
+    }
+
+    pub fn print_branch_inst(&mut self, _val_id: &ValueId, inst: &BranchInst) {
+        let cond_val = Value::resolve(inst.cond, self.module);
+        print!("br i1 {}, ", self.format_value(&inst.cond, cond_val));
+        print!("label %{}, ", self.resolve_name(&inst.then_bb));
+        print!("label %{}", self.resolve_name(&inst.else_bb));
+        println!();
+    }
+
+    pub fn print_jump_inst(&mut self, _val_id: &ValueId, inst: &JumpInst) {
+        print!("br label %{}", self.resolve_name(&inst.bb));
+        println!();
     }
 
     pub fn print_call_inst(&mut self, val_id: &ValueId, inst: &CallInst) {

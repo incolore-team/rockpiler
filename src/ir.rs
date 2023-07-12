@@ -152,16 +152,24 @@ pub struct FunctionValue {
     pub params: Vec<ValueId>, // Parameters
     pub ret_ty: Type,
     pub bbs: BasicBlockList, // BasicBlocks
+    pub is_external: bool,
     pub is_var_arg: bool,
 }
 
 impl FunctionValue {
-    pub fn new(name: String, params: Vec<ValueId>, ret_ty: Type, is_var_arg: bool) -> Self {
+    pub fn new(
+        name: String,
+        params: Vec<ValueId>,
+        ret_ty: Type,
+        is_external: bool,
+        is_var_arg: bool,
+    ) -> Self {
         FunctionValue {
             name,
             params,
             ret_ty,
             bbs: BasicBlockList::default(),
+            is_external,
             is_var_arg,
         }
     }

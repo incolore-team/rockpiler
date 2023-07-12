@@ -67,6 +67,7 @@ impl Builder {
 
     pub fn build_function(&mut self, func_decl: &FuncDecl) {
         let name = func_decl.name.clone();
+        let is_external = func_decl.is_external();
         let ret_ty = self.build_type(&func_decl.ret_ty);
 
         let mut params = Vec::new();
@@ -84,15 +85,18 @@ impl Builder {
         }
 
         let is_var_arg = false;
-        let mut cur_func = FunctionValue::new(name, params, ret_ty, is_var_arg);
-        let entry_bb = BasicBlockValue::new("entry".to_string());
+        let mut cur_func = FunctionValue::new(name, params, ret_ty, is_external, is_var_arg);
 
-        let entry_bb_id = self.alloc_value(Value::BasicBlock(entry_bb));
-        cur_func
-            .bbs
-            .append_with_name(entry_bb_id, "entry".to_string());
+        if !is_external {
+            let entry_bb = BasicBlockValue::new("entry".to_string());
 
-        self.cur_bb = Some(entry_bb_id);
+            let entry_bb_id = self.alloc_value(Value::BasicBlock(entry_bb));
+            cur_func
+                .bbs
+                .append_with_name(entry_bb_id, "entry".to_string());
+
+            self.cur_bb = Some(entry_bb_id);
+        }
 
         let function_id = self.alloc_value(Value::Function(cur_func));
         self.module
@@ -100,21 +104,22 @@ impl Builder {
             .insert(func_decl.name.clone(), function_id);
 
         self.cur_func = Some(function_id);
+        if !is_external {
+            let mut index = 0;
+            for param in &func_decl.params {
+                let alloca_id = self.spawn_alloca_inst(param.name.clone(), param.type_.clone());
+                self.module
+                    .sym2def
+                    .insert(param.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
 
-        let mut index = 0;
-        for param in &func_decl.params {
-            let alloca_id = self.spawn_alloca_inst(param.name.clone(), param.type_.clone());
-            self.module
-                .sym2def
-                .insert(param.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
-
-            // store param to allocated mem
-            let param_value = self.cur_func().params[index];
-            self.spawn_store_inst(alloca_id, param_value);
-            index += 1;
-        }
-        for stmt in &func_decl.body.stmts {
-            self.build_statement(stmt);
+                // store param to allocated mem
+                let param_value = self.cur_func().params[index];
+                self.spawn_store_inst(alloca_id, param_value);
+                index += 1;
+            }
+            if let Some(body) = &func_decl.body {
+                self.build_block_statement(body);
+            }
         }
     }
 
@@ -186,10 +191,18 @@ impl Builder {
             Stmt::VarDecls(var_decls_stmt) => {
                 self.build_var_decls_statement(var_decls_stmt);
             }
-            _ => {
-                panic!("{:?}", stmt);
-                todo!()
+            Stmt::Block(block_stmt) => {
+                self.build_block_statement(block_stmt);
             }
+            Stmt::Break => todo!(),
+            Stmt::DoWhile(_) => todo!(),
+            Stmt::Continue => todo!(),
+        }
+    }
+
+    pub fn build_block_statement(&mut self, block_stmt: &Block) {
+        for stmt in &block_stmt.stmts {
+            self.build_statement(stmt);
         }
     }
 
@@ -245,9 +258,62 @@ impl Builder {
         alloca_id
     }
 
+    pub fn visit_cond_expr(&mut self, cond_expr: &Box<Expr>, true_bb: ValueId, false_bb: ValueId) {
+        let mut is_short_circuit_eval = false;
+        let expr = &**cond_expr;
+
+        if let Expr::Infix(infix_expr) = expr {
+            is_short_circuit_eval =
+                infix_expr.op == InfixOp::LogicAnd || infix_expr.op == InfixOp::LogicOr;
+        }
+
+        if is_short_circuit_eval {
+            let next_bb;
+            let infix_expr = match expr {
+                Expr::Infix(infix_expr) => infix_expr,
+                _ => unreachable!(),
+            };
+
+            if infix_expr.op == InfixOp::LogicAnd {
+                next_bb = self.spawn_basic_block();
+                self.visit_cond_expr(&infix_expr.lhs, next_bb.clone(), false_bb);
+            } else if infix_expr.op == InfixOp::LogicOr {
+                next_bb = self.spawn_basic_block();
+                self.visit_cond_expr(&infix_expr.lhs, true_bb, next_bb.clone());
+            } else {
+                unreachable!();
+            }
+
+            self.cur_bb = Some(next_bb);
+            self.visit_cond_expr(&infix_expr.rhs, true_bb, false_bb);
+        } else {
+            let cond_value = self.build_expr(&cond_expr, false);
+            self.spawn_br_inst(cond_value, true_bb, false_bb);
+        }
+    }
+
     pub fn build_if_statement(&mut self, if_stmt: &IfElseStmt) {
-        let condition = self.build_expr(&if_stmt.cond, false);
-        todo!()
+        let true_bb = self.spawn_basic_block();
+        let exit_bb = self.alloc_basic_block();
+        let false_bb = if if_stmt.else_stmt.is_some() {
+            self.spawn_basic_block()
+        } else {
+            exit_bb.clone()
+        };
+
+        self.visit_cond_expr(&if_stmt.cond, true_bb.clone(), false_bb.clone());
+
+        self.cur_bb = Some(true_bb);
+        self.build_statement(&if_stmt.then_stmt);
+        self.spawn_jump_inst(exit_bb.clone());
+
+        if let Some(else_stmt) = &if_stmt.else_stmt {
+            self.cur_bb = Some(false_bb);
+            self.build_statement(else_stmt);
+            self.spawn_jump_inst(exit_bb.clone());
+        }
+        self.cur_func_mut().bbs.append(exit_bb.clone());
+        self.cur_bb = Some(exit_bb);
     }
     /*
     int main() {
@@ -281,17 +347,17 @@ impl Builder {
     }
      */
     pub fn build_while_statement(&mut self, while_stmt: &WhileStmt) {
-        let cond_bb = self.build_basic_block();
-        let body_bb = self.build_basic_block();
-        let end_bb = self.build_basic_block();
+        let cond_bb = self.spawn_basic_block();
+        let body_bb = self.spawn_basic_block();
+        let end_bb = self.spawn_basic_block();
 
         self.set_insert_point(cond_bb);
         let cond_value = self.build_expr(&while_stmt.cond, false);
-        self.build_br_inst(cond_value, body_bb, end_bb);
+        self.spawn_br_inst(cond_value, body_bb, end_bb);
 
         self.set_insert_point(body_bb);
         self.build_statement(&while_stmt.body);
-        self.build_jump_inst(cond_bb);
+        self.spawn_jump_inst(cond_bb);
     }
 
     pub fn get_value(&self, value_id: ValueId) -> &Value {
@@ -308,22 +374,22 @@ impl Builder {
         br_id
     }
 
-    pub fn build_br_inst(&mut self, cond: ValueId, true_bb: ValueId, false_bb: ValueId) -> ValueId {
-        let br_id = self.alloc_br_inst(cond, true_bb, false_bb);
-        self.cur_bb_mut().insts.push_back(br_id);
-        br_id
-    }
-
     pub fn alloc_jump_inst(&mut self, bb: ValueId) -> ValueId {
         let jump = JumpInst { bb };
         let jump_id = self.alloc_value(jump.into());
         jump_id
     }
 
-    pub fn build_jump_inst(&mut self, bb: ValueId) -> ValueId {
+    pub fn spawn_jump_inst(&mut self, bb: ValueId) -> ValueId {
         let jump_id = self.alloc_jump_inst(bb);
         self.cur_bb_mut().insts.push_back(jump_id);
         jump_id
+    }
+
+    pub fn spawn_br_inst(&mut self, cond: ValueId, true_bb: ValueId, false_bb: ValueId) -> ValueId {
+        let br_id = self.alloc_br_inst(cond, true_bb, false_bb);
+        self.cur_bb_mut().insts.push_back(br_id);
+        br_id
     }
 
     pub fn alloc_basic_block(&mut self) -> ValueId {
@@ -331,7 +397,7 @@ impl Builder {
         let bb_id = self.alloc_value(Value::BasicBlock(bb));
         bb_id
     }
-    pub fn build_basic_block(&mut self) -> ValueId {
+    pub fn spawn_basic_block(&mut self) -> ValueId {
         let bb_id = self.alloc_basic_block();
         self.cur_func_mut().bbs.append(bb_id);
         bb_id
@@ -371,9 +437,9 @@ impl Builder {
             .as_ref()
             .map(|init| self.build_expr(init, false));
 
-        let cond_bb = self.build_basic_block();
-        let body_bb = self.build_basic_block();
-        let end_bb = self.build_basic_block();
+        let cond_bb = self.spawn_basic_block();
+        let body_bb = self.spawn_basic_block();
+        let end_bb = self.spawn_basic_block();
 
         self.set_insert_point(cond_bb);
         let cond_value = for_stmt
@@ -381,9 +447,9 @@ impl Builder {
             .as_ref()
             .map(|cond| self.build_expr(cond, false));
         if let Some(cond_value) = cond_value {
-            self.build_br_inst(cond_value, body_bb, end_bb);
+            self.spawn_br_inst(cond_value, body_bb, end_bb);
         } else {
-            self.build_jump_inst(body_bb);
+            self.spawn_jump_inst(body_bb);
         }
 
         self.set_insert_point(body_bb);
@@ -394,7 +460,7 @@ impl Builder {
             .as_ref()
             .map(|update| self.build_expr(update, false));
 
-        self.build_jump_inst(cond_bb);
+        self.spawn_jump_inst(cond_bb);
     }
 
     pub fn build_return_statement(&mut self, return_stmt: &ReturnStmt) {
@@ -402,10 +468,10 @@ impl Builder {
             .expr
             .as_ref()
             .map(|expr| self.build_expr(expr, false));
-        self.build_return_inst(value);
+        self.spawn_return_inst(value);
     }
 
-    pub fn build_return_inst(&mut self, value: Option<ValueId>) -> ValueId {
+    pub fn spawn_return_inst(&mut self, value: Option<ValueId>) -> ValueId {
         let ret = ReturnInst { value };
         let ret_id = self.alloc_value(ret.into());
         self.cur_bb_mut().insts.push_back(ret_id);

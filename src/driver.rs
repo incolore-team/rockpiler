@@ -1,12 +1,14 @@
 use log::trace;
 
-use crate::{cli::Args, ir_printer, scope::SymbolTable, sema::ToSemaTrait, pass::inst_namer};
+use crate::{cli::Args, ir_printer, pass::inst_namer, scope::SymbolTable, sema::ToSemaTrait};
 
 pub fn drive(args: Args) {
     assert!(args.inputs.len() > 0);
+    let prelude = include_str!("prelude.c").to_string();
     for f_input in args.inputs {
         trace!("compiling {:?}", f_input);
-        let src = std::fs::read_to_string(f_input).expect("unable to read file");
+        let mut src = std::fs::read_to_string(f_input).expect("unable to read file");
+        src = format!("{}\n{}", prelude, src);
         trace!("================== SRC => AST ==================");
         let ast = crate::parser::parse(&src);
         trace!("ast: {:#?}", ast);
