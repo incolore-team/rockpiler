@@ -6,7 +6,7 @@ use pest::{
     Parser,
 };
 
-use crate::ast::*;
+use crate::{ast::*, ir::ValueId};
 type ParseResult<T> = Result<T, Box<ParseError<Rule>>>;
 
 trait IntoParseResult<T> {

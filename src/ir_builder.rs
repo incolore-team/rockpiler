@@ -1,4 +1,4 @@
-use std::clone;
+use std::{clone, collections::HashMap};
 
 use crate::{ast::*, ir::*, scope::*, util::Insertable};
 
@@ -14,6 +14,8 @@ struct Builder {
     // 只是为了函数少两个参数
     cur_func: Option<ValueId>,
     cur_bb: Option<ValueId>,
+
+    loop_stack: Vec<(ValueId, ValueId)>, // (break target bb, continue target bb)
 }
 
 impl Builder {
@@ -23,6 +25,8 @@ impl Builder {
 
             cur_func: None,
             cur_bb: None,
+
+            loop_stack: Vec::new(),
         }
     }
 
@@ -194,10 +198,28 @@ impl Builder {
             Stmt::Block(block_stmt) => {
                 self.build_block_statement(block_stmt);
             }
-            Stmt::Break => todo!(),
+            Stmt::Break => self.build_break_statement(),
             Stmt::DoWhile(_) => todo!(),
-            Stmt::Continue => todo!(),
+            Stmt::Continue => self.build_continue_statement(),
         }
+    }
+
+    pub fn build_break_statement(&mut self) {
+        if self.loop_stack.is_empty() {
+            panic!("break statement not in loop");
+        }
+
+        let (break_bb, _) = self.loop_stack.last().unwrap().clone();
+        self.spawn_jump_inst(break_bb);
+    }
+
+    pub fn build_continue_statement(&mut self) {
+        if self.loop_stack.is_empty() {
+            panic!("continue statement not in loop");
+        }
+
+        let (_, cont_bb) = self.loop_stack.last().unwrap().clone();
+        self.spawn_jump_inst(cont_bb);
     }
 
     pub fn build_block_statement(&mut self, block_stmt: &Block) {
@@ -349,15 +371,23 @@ impl Builder {
     pub fn build_while_statement(&mut self, while_stmt: &WhileStmt) {
         let cond_bb = self.spawn_basic_block();
         let body_bb = self.spawn_basic_block();
-        let end_bb = self.spawn_basic_block();
+        let end_bb = self.alloc_basic_block();
 
-        self.set_insert_point(cond_bb);
-        let cond_value = self.build_expr(&while_stmt.cond, false);
-        self.spawn_br_inst(cond_value, body_bb, end_bb);
+        self.loop_stack.push((end_bb, cond_bb));
+        {
+            self.set_insert_point(cond_bb);
+            let cond_value = self.build_expr(&while_stmt.cond, false);
+            self.spawn_br_inst(cond_value, body_bb, end_bb);
 
-        self.set_insert_point(body_bb);
-        self.build_statement(&while_stmt.body);
-        self.spawn_jump_inst(cond_bb);
+            self.set_insert_point(body_bb);
+            self.build_statement(&while_stmt.body);
+            self.spawn_jump_inst(cond_bb);
+
+            self.cur_func_mut().bbs.append(end_bb.clone());
+
+            self.set_insert_point(end_bb);
+        }
+        self.loop_stack.pop();
     }
 
     pub fn get_value(&self, value_id: ValueId) -> &Value {

@@ -1,4 +1,4 @@
-use crate::sema::SemaRef;
+use crate::{ir::ValueId, sema::SemaRef};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TransUnit {
@@ -166,6 +166,16 @@ pub struct IfElseStmt {
 pub struct WhileStmt {
     pub cond: Box<Expr>,
     pub body: Box<Stmt>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct BreakStmt {
+    pub target: Option<ValueId>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ContinueStmt {
+    pub target: Option<ValueId>,
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct ForStmt {

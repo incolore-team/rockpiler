@@ -26,15 +26,15 @@ const_expr = { expr }
 block_item = { var_decls | stmt }
 
 stmt = {
-    expr_stmt
+    break_stmt
+    | continue_stmt
+    | expr_stmt
     | block_stmt
     | if_else_stmt
     | if_stmt
     | while_stmt
     | for_stmt
-    | break_stmt
     | do_while_stmt
-    | continue_stmt
     | return_stmt
 }
 
