@@ -106,14 +106,54 @@ impl Module {
         }
     }
 
+    /// 对一个 Value 做不再使用处理
+    ///
+    /// 将移除所有对它的使用记录
+    /// 调用前确保没有任何指令依赖于该 Value
     pub fn mark_nolonger_use(&mut self, value_id: ValueId) {
-        let all_users = self.value_user.get(&value_id).unwrap().clone();
+        let tmp = self.value_user.get(&value_id);
+        if tmp.is_none() {
+            panic!("value {:?} is not used", value_id);
+        }
+
+        let all_users = tmp.unwrap().clone();
         self.value_user.remove(&value_id);
+
         for user in all_users {
             if let Some(users) = self.value_using.get_mut(&user) {
                 users.retain(|&x| x != value_id);
             }
         }
+
+        // todo: 验证确实没有任何指令依赖于该 Value
+    }
+
+    /// 替换一个 Value 为另一个 Value
+    ///
+    /// 这意味着旧的 Value 不再被使用，而新的 Value 被使用
+    /// 除了更新记录，此函数还负责将所有指令中对词 Value 的使用替换为新的 Value
+    pub fn replace_value(&mut self, value_id: ValueId, new_value_id: ValueId) {
+        let tmp = self.value_user.get(&value_id);
+        if tmp.is_none() {
+            panic!("value {:?} is not used", value_id);
+        }
+
+        let all_users = tmp.unwrap().clone();
+        self.value_user.remove(&value_id);
+
+        for user in all_users {
+            if let Some(users) = self.value_using.get_mut(&user) {
+                users.retain(|&x| x != value_id);
+                users.push(new_value_id);
+            }
+        }
+
+        self.values.iter_mut().for_each(|(val_id, val)| match val {
+            Value::Instruction(inst) => {
+                inst.replace_operands(value_id, new_value_id);
+            }
+            _ => {}
+        });
     }
 
     pub fn mark_using(&mut self, user: ValueId, used: ValueId) {
@@ -258,6 +298,12 @@ impl BasicBlockValue {
     }
 }
 
+impl Into<Value> for BasicBlockValue {
+    fn into(self) -> Value {
+        Value::BasicBlock(self)
+    }
+}
+
 /// 在 LLVM 叫 Argument
 #[derive(Debug, Clone)]
 pub struct VariableValue {
@@ -312,6 +358,34 @@ impl InstValue {
             InstValue::Cast(_) => true,
         }
     }
+
+    pub fn replace_operands(&mut self, old_value_id: ValueId, new_value_id: ValueId) {
+        match self {
+            InstValue::InfixOp(op) => op.replace_operands(old_value_id, new_value_id),
+            InstValue::Load(inst) => inst.replace_operands(old_value_id, new_value_id),
+            InstValue::Store(inst) => inst.replace_operands(old_value_id, new_value_id),
+            InstValue::Alloca(inst) => inst.replace_operands(old_value_id, new_value_id),
+            InstValue::Branch(inst) => inst.replace_operands(old_value_id, new_value_id),
+            InstValue::Jump(inst) => inst.replace_operands(old_value_id, new_value_id),
+            InstValue::Gep(inst) => inst.replace_operands(old_value_id, new_value_id),
+            InstValue::Return(inst) => inst.replace_operands(old_value_id, new_value_id),
+            InstValue::Call(inst) => inst.replace_operands(old_value_id, new_value_id),
+            InstValue::Phi(inst) => inst.replace_operands(old_value_id, new_value_id),
+            InstValue::Cast(inst) => inst.replace_operands(old_value_id, new_value_id),
+        }
+    }
+}
+
+macro_rules! impl_replace_operands {
+    ($ty:ty, $($field:ident),+) => {
+        impl $ty {
+            pub fn replace_operands(&mut self, old_value_id: ValueId, new_value_id: ValueId) {
+                $(if self.$field == old_value_id {
+                    self.$field = new_value_id;
+                })*
+            }
+        }
+    };
 }
 
 /// An immediate value.
@@ -417,6 +491,12 @@ impl Into<Value> for AllocaInst {
     }
 }
 
+impl AllocaInst {
+    pub fn replace_operands(&mut self, _old_value_id: ValueId, _new_value_id: ValueId) {
+        // do nothing
+    }
+}
+
 /// OP <ty> <left>, <right>
 #[derive(Debug, Clone)]
 pub struct BinaryOperator {
@@ -432,6 +512,8 @@ impl Into<Value> for BinaryOperator {
     }
 }
 
+impl_replace_operands!(BinaryOperator, lhs, rhs);
+
 /// call <ty> <callee>(<ty> <arg1>, <ty> <arg2>, ...)
 #[derive(Debug, Clone)]
 pub struct CallInst {
@@ -443,6 +525,19 @@ pub struct CallInst {
 impl Into<Value> for CallInst {
     fn into(self) -> Value {
         Value::Instruction(InstValue::Call(self))
+    }
+}
+
+impl CallInst {
+    pub fn replace_operands(&mut self, old_value_id: ValueId, new_value_id: ValueId) {
+        if self.func == old_value_id {
+            self.func = new_value_id;
+        }
+        for arg in &mut self.args {
+            if *arg == old_value_id {
+                *arg = new_value_id;
+            }
+        }
     }
 }
 
@@ -476,6 +571,8 @@ impl Into<Value> for CastInst {
     }
 }
 
+impl_replace_operands!(CastInst, value);
+
 /// load <ty>, <ty>* <source>
 #[derive(Debug, Clone)]
 pub struct LoadInst {
@@ -489,6 +586,8 @@ impl Into<Value> for LoadInst {
     }
 }
 
+impl_replace_operands!(LoadInst, src);
+
 /// store <ty> <value>, <ty>* <pointer>
 #[derive(Debug, Clone)]
 pub struct StoreInst {
@@ -501,6 +600,8 @@ impl Into<Value> for StoreInst {
         Value::Instruction(InstValue::Store(self))
     }
 }
+
+impl_replace_operands!(StoreInst, value, ptr);
 
 /// gep [inbounds] [volatile]
 ///     <pointer_type> <pointer_value>, [integer_type] <index>
@@ -518,6 +619,19 @@ impl Into<Value> for GetElementPtrInst {
     }
 }
 
+impl GetElementPtrInst {
+    pub fn replace_operands(&mut self, old_value_id: ValueId, new_value_id: ValueId) {
+        if self.pointer == old_value_id {
+            self.pointer = new_value_id;
+        }
+        for index in &mut self.indices {
+            if *index == old_value_id {
+                *index = new_value_id;
+            }
+        }
+    }
+}
+
 /// br <label>
 #[derive(Debug, Clone)]
 pub struct JumpInst {
@@ -529,6 +643,8 @@ impl Into<Value> for JumpInst {
         Value::Instruction(InstValue::Jump(self))
     }
 }
+
+impl_replace_operands!(JumpInst, bb);
 
 /// br i1 <cond>, label <iftrue>, label <iffalse>
 #[derive(Debug, Clone)]
@@ -544,15 +660,53 @@ impl Into<Value> for BranchInst {
     }
 }
 
+impl_replace_operands!(BranchInst, cond, then_bb, else_bb);
+
+#[test]
+fn test_macro_impl_replace_operands() {
+    let mut arena = Arena::<Value>::new();
+    let mut inst = BranchInst {
+        cond: arena.alloc(
+            (ConstInt {
+                ty: BuiltinType::Int.into(),
+                value: 1,
+            })
+            .into(),
+        ),
+        then_bb: arena.alloc(BasicBlockValue::default().into()),
+        else_bb: arena.alloc(BasicBlockValue::default().into()),
+    };
+    let new_then_bb = arena.alloc(BasicBlockValue::default().into());
+    let new_else_bb = arena.alloc(BasicBlockValue::default().into());
+
+    inst.replace_operands(inst.then_bb, new_then_bb);
+    assert_eq!(inst.then_bb, new_then_bb);
+
+    inst.replace_operands(inst.else_bb, new_else_bb);
+    assert_eq!(inst.then_bb, new_then_bb);
+    assert_eq!(inst.else_bb, new_else_bb);
+}
+
 /// ret <ty> <value>
 #[derive(Debug, Clone)]
 pub struct ReturnInst {
     // pub ty: Type,
     pub value: Option<ValueId>,
 }
+
 impl Into<Value> for ReturnInst {
     fn into(self) -> Value {
         Value::Instruction(InstValue::Return(self))
+    }
+}
+
+impl ReturnInst {
+    fn replace_operands(&mut self, old_value_id: ValueId, new_value_id: ValueId) {
+        if let Some(value) = &mut self.value {
+            if *value == old_value_id {
+                *value = new_value_id;
+            }
+        }
     }
 }
 
@@ -562,11 +716,31 @@ pub enum TermInst {
     Return(ReturnInst),
 }
 
+impl Into<Value> for TermInst {
+    fn into(self) -> Value {
+        match self {
+            TermInst::Jump(inst) => inst.into(),
+            TermInst::Branch(inst) => inst.into(),
+            TermInst::Return(inst) => inst.into(),
+        }
+    }
+}
+
 /// phi <ty> [ <val0>, <label0>], ...
 #[derive(Debug, Clone)]
 pub struct PhiInst {
     pub ty: Type,
     pub incoming: Vec<(ValueId, ValueId)>,
+}
+
+impl PhiInst {
+    pub fn replace_operands(&mut self, old_value_id: ValueId, new_value_id: ValueId) {
+        for (value, _) in &mut self.incoming {
+            if *value == old_value_id {
+                *value = new_value_id;
+            }
+        }
+    }
 }
 
 impl Into<Value> for PhiInst {

@@ -60,12 +60,10 @@ impl Mem2Reg<'_> {
                         if !promotables.contains(&load_inst.src) {
                             return true;
                         }
-
-                        let alloca_inst = self.module.get_inst(load_inst.src);
                         // var ptr = (AllocaInst)load.getPtr();
-                        // Value v = readVariable(bb, ptr);
+                        let var = self.read_var(bb_id, load_inst.src);
                         // // inst的use就不用移除了，因为另外一边是alloca，之后也会被移除。
-                        // inst.replaceAllUseWith(v);
+                        // inst.replaceAllUseWith(var);
                         // it.remove();
                         false
                     } else if let InstValue::Store(store_inst) = inst {
@@ -77,9 +75,7 @@ impl Mem2Reg<'_> {
                         let store_val = store_inst.value;
                         self.write_var(bb_id, store_target, store_val);
                         self.module.mark_nolonger_use(inst_id);
-                        // // 主要是从sto.getVal()的users中移除自身。
                         // inst.removeAllOperandUseFromValue();
-                        // it.remove();
                         false
                     } else {
                         true
