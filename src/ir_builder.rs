@@ -1,6 +1,6 @@
 use std::{clone, collections::HashMap};
 
-use crate::{ast::*, ir::*, scope::*, util::Insertable};
+use crate::{ast::*, ir::*, scope::*};
 
 pub fn build(ast: &mut TransUnit, syms: SymbolTable) -> Module {
     let mut builder = Builder::new(syms);
@@ -239,7 +239,7 @@ impl Builder {
                         ptr: alloca_id,
                     };
                     let store_id = self.alloc_value(store_inst.into());
-                    self.cur_bb_mut().insts.push_back(store_id);
+                    self.cur_bb_mut().insts.push(store_id);
                     self.module
                         .sym2def
                         .insert(decl.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
@@ -412,13 +412,13 @@ impl Builder {
 
     pub fn spawn_jump_inst(&mut self, bb: ValueId) -> ValueId {
         let jump_id = self.alloc_jump_inst(bb);
-        self.cur_bb_mut().insts.push_back(jump_id);
+        self.cur_bb_mut().insts.push(jump_id);
         jump_id
     }
 
     pub fn spawn_br_inst(&mut self, cond: ValueId, true_bb: ValueId, false_bb: ValueId) -> ValueId {
         let br_id = self.alloc_br_inst(cond, true_bb, false_bb);
-        self.cur_bb_mut().insts.push_back(br_id);
+        self.cur_bb_mut().insts.push(br_id);
         br_id
     }
 
@@ -504,7 +504,7 @@ impl Builder {
     pub fn spawn_return_inst(&mut self, value: Option<ValueId>) -> ValueId {
         let ret = ReturnInst { value };
         let ret_id = self.alloc_value(ret.into());
-        self.cur_bb_mut().insts.push_back(ret_id);
+        self.cur_bb_mut().insts.push(ret_id);
         ret_id
     }
 
@@ -517,7 +517,7 @@ impl Builder {
     pub fn spawn_store_inst(&mut self, ptr: ValueId, value: ValueId) -> ValueId {
         let store = StoreInst { ptr, value };
         let store_id = self.alloc_value(store.into());
-        self.cur_bb_mut().insts.push_back(store_id);
+        self.cur_bb_mut().insts.push(store_id);
         store_id
     }
 
@@ -542,7 +542,7 @@ impl Builder {
                 };
 
                 let val_id = self.alloc_value(bin_op.into());
-                self.cur_bb_mut().insts.push_back(val_id);
+                self.cur_bb_mut().insts.push(val_id);
                 val_id // returns the binary operator value id
             }
             Expr::Prefix(prefix_expr) => {
@@ -564,7 +564,7 @@ impl Builder {
                     rhs,
                 };
                 let val_id = self.alloc_value(bin_op.into());
-                self.cur_bb_mut().insts.push_back(val_id);
+                self.cur_bb_mut().insts.push(val_id);
                 val_id // returns the binary operator value id
             }
             Expr::Postfix(postfix_expr) => {
@@ -603,7 +603,7 @@ impl Builder {
                         args,
                     };
                     let val_id = self.alloc_value(call_inst.into());
-                    self.cur_bb_mut().insts.push_back(val_id);
+                    self.cur_bb_mut().insts.push(val_id);
                     val_id //
                 }
                 PrimaryExpr::Ident(ident_expr) => {
@@ -642,7 +642,7 @@ impl Builder {
             src,
         };
         let val_id = self.alloc_value(load_inst.into());
-        self.cur_bb_mut().insts.push_back(val_id);
+        self.cur_bb_mut().insts.push(val_id);
         val_id
     }
 

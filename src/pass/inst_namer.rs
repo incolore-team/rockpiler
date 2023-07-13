@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use crate::ir::{Module, ValueId};
 
 pub fn run(module: &mut Module) {

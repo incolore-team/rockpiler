@@ -214,7 +214,7 @@ impl FunctionValue {}
 #[derive(Debug, Clone, Default)]
 pub struct BasicBlockValue {
     pub name: String,
-    pub insts: LinkedList<ValueId>,
+    pub insts: Vec<ValueId>, // 麻了，不用链表了
     pub terminator: Option<ValueId>,
 }
 
@@ -222,7 +222,7 @@ impl BasicBlockValue {
     pub fn new(name: String) -> Self {
         BasicBlockValue {
             name,
-            insts: LinkedList::new(),
+            insts: Vec::new(),
             terminator: None,
         }
     }
