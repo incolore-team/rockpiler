@@ -1,10 +1,6 @@
 use std::collections::VecDeque;
 
 use crate::{ast::*, ir::*, scope::*};
-use log::trace;
-use std::{clone, collections::HashMap};
-
-use crate::{ast::*, ir::*, scope::*};
 
 pub fn build(ast: &mut TransUnit, syms: SymbolTable) -> Module {
     let mut builder = Builder::new(syms);
@@ -184,13 +180,8 @@ impl Builder {
                         // let iv_ = array_init_val.0.get(i);
                         let iv_ = deque.front().cloned();
                         if let Some(iv) = iv_ {
-                            let gep_inst = GetElementPtrInst {
-                                ty: Type::Array(ArrayType::Constant(type_.clone())).into(),
-                                pointer: ptr,
-                                indices: vec![i32_zero_id, i32_i_id],
-                            };
-                            let gep_id = self.alloc_value(gep_inst.into());
-                            self.cur_bb_mut().insts.push(gep_id);
+                            let ty = Type::Array(ArrayType::Constant(const_at.clone())).into();
+                            let gep_id = self.spawn_gep_inst(ty, ptr, vec![i32_zero_id, i32_i_id]);
                             match iv {
                                 InitVal::Array(array_iv) => {
                                     // let mut queue = VecDeque::from(array_iv.0.clone());
@@ -213,21 +204,9 @@ impl Builder {
                     let iv_ = deque.pop_front();
                     if let Some(iv) = iv_ {
                         let init_val = self.build_init_val(&iv, elem_type);
-
-                        let gep_inst = GetElementPtrInst {
-                            ty: Type::Array(ArrayType::Constant(type_.clone())).into(),
-                            pointer: ptr,
-                            indices: vec![i32_zero_id, i32_i_id],
-                        };
-                        let gep_id = self.alloc_value(gep_inst.into());
-                        self.cur_bb_mut().insts.push(gep_id);
-
-                        let store_inst = StoreInst {
-                            value: init_val,
-                            ptr: gep_id,
-                        };
-                        let store_id = self.alloc_value(store_inst.into());
-                        self.cur_bb_mut().insts.push(store_id);
+                        let ty = Type::Array(ArrayType::Constant(type_.clone())).into();
+                        let gep_id = self.spawn_gep_inst(ty, ptr, vec![i32_zero_id, i32_i_id]);
+                        self.spawn_store_inst(gep_id, init_val);
                     }
                 }
             }
@@ -324,12 +303,7 @@ impl Builder {
                         }
                         _ => {
                             let init_val_id = self.build_init_val(init_val, &decl.type_);
-                            let store_inst = StoreInst {
-                                value: init_val_id,
-                                ptr: alloca_id,
-                            };
-                            let store_id = self.alloc_value(store_inst.into());
-                            self.cur_bb_mut().insts.push(store_id);
+                            self.spawn_store_inst(alloca_id, init_val_id);
                         }
                     }
                     self.module
@@ -493,12 +467,16 @@ impl Builder {
             else_bb,
         };
         let br_id = self.alloc_value(br.into());
+        self.module.mark_using(br_id, cond);
+        self.module.mark_using(br_id, then_bb);
+        self.module.mark_using(br_id, else_bb);
         br_id
     }
 
     pub fn alloc_jump_inst(&mut self, bb: ValueId) -> ValueId {
         let jump = JumpInst { bb };
         let jump_id = self.alloc_value(jump.into());
+        self.module.mark_using(jump_id, bb);
         jump_id
     }
 
@@ -596,6 +574,9 @@ impl Builder {
     pub fn spawn_return_inst(&mut self, value: Option<ValueId>) -> ValueId {
         let ret = ReturnInst { value };
         let ret_id = self.alloc_value(ret.into());
+        if let Some(value) = value {
+            self.module.mark_using(ret_id, value);
+        }
         self.cur_bb_mut().insts.push(ret_id);
         ret_id
     }
@@ -607,12 +588,40 @@ impl Builder {
     }
 
     pub fn spawn_store_inst(&mut self, ptr: ValueId, value: ValueId) -> ValueId {
+        {
+            // make sure ptr is a pointer
+            let inst = self.module.get_inst(ptr);
+            match inst {
+                InstValue::Alloca(_) => {}
+                _ => panic!("ptr is not a pointer"),
+            }
+        }
         let store = StoreInst { ptr, value };
         let store_id = self.alloc_value(store.into());
+
+        self.module.mark_using(store_id, ptr);
+        self.module.mark_using(store_id, value);
+
         self.cur_bb_mut().insts.push(store_id);
         store_id
     }
 
+    pub fn spawn_gep_inst(&mut self, ty: Type, pointer: ValueId, indices: Vec<ValueId>) -> ValueId {
+        let gep = GetElementPtrInst {
+            ty,
+            pointer,
+            indices: indices.clone(),
+        };
+        let gep_id = self.alloc_value(gep.into());
+
+        self.module.mark_using(gep_id, pointer);
+        for index in indices.clone() {
+            self.module.mark_using(gep_id, index);
+        }
+
+        self.cur_bb_mut().insts.push(gep_id);
+        gep_id
+    }
     // is_lval 表示是否是左值表达式，如果是，则不需要生成 LoadInst
     pub fn build_expr(&mut self, expr: &Box<Expr>, is_lval: bool) -> ValueId {
         let expr = &**expr;
@@ -688,15 +697,7 @@ impl Builder {
 
                     let args = args.into_iter().map(|arg| self.build_expr(&arg, false)); // 使用临时 Vec 构建表达式，避免多次借用 self
                     let args = args.collect::<Vec<_>>(); // 将结果收集到一个临时的 Vec 中
-                    let func_value = self.module.values.get(func_id).unwrap();
-                    let call_inst = CallInst {
-                        ty: func_value.ty(),
-                        func: func_id.clone(),
-                        args,
-                    };
-                    let val_id = self.alloc_value(call_inst.into());
-                    self.cur_bb_mut().insts.push(val_id);
-                    val_id //
+                    self.spawn_call_inst(func_id.clone(), args)
                 }
                 PrimaryExpr::Ident(ident_expr) => {
                     /*
@@ -728,12 +729,30 @@ impl Builder {
         }
     }
 
-    fn spawn_load_inst(&mut self, src: ValueId) -> ValueId {
+    pub fn spawn_load_inst(&mut self, src: ValueId) -> ValueId {
         let load_inst = LoadInst {
             ty: self.module.values.get(src).unwrap().ty(),
             src,
         };
         let val_id = self.alloc_value(load_inst.into());
+
+        self.module.mark_using(val_id, src);
+
+        self.cur_bb_mut().insts.push(val_id);
+        val_id
+    }
+
+    pub fn spawn_call_inst(&mut self, func: ValueId, args: Vec<ValueId>) -> ValueId {
+        let func_value = self.module.values.get(func).unwrap();
+        let call_inst = CallInst {
+            ty: func_value.ty(),
+            func,
+            args,
+        };
+        let val_id = self.alloc_value(call_inst.into());
+
+        self.module.mark_using(val_id, func);
+
         self.cur_bb_mut().insts.push(val_id);
         val_id
     }

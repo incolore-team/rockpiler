@@ -26,13 +26,14 @@ pub struct Module {
     pub global_variables: LinkedHashMap<String, ValueId>,
     pub syms: SymbolTable,
     // 一般存放符号对应的 alloca 语句 value id，或者全局变量 valud id
-    pub sym2def: LinkedHashMap<SymbolId, ValueId>,
+    pub sym2def: LinkedHashMap<SymbolId, ValueId>, // 今后考虑移动到 builder 里面
     pub functions: LinkedHashMap<String, ValueId>,
     pub builtins: LinkedHashMap<String, ValueId>,
     pub constants: LinkedHashMap<String, ValueId>,
 
     // value -> users of the value
     pub value_user: HashMap<ValueId, Vec<ValueId>>,
+    pub value_using: HashMap<ValueId, Vec<ValueId>>,
     // value -> name of the value
     pub value_name: HashMap<ValueId, String>,
 }
@@ -49,6 +50,7 @@ impl Module {
             builtins: LinkedHashMap::new(),
             constants: LinkedHashMap::new(),
             value_user: HashMap::new(),
+            value_using: HashMap::new(),
             value_name: HashMap::new(),
         };
         // module.add_builtin_types();
@@ -102,6 +104,27 @@ impl Module {
             Value::GlobalVariable(gv) => gv,
             _ => panic!("expect a global variable"),
         }
+    }
+
+    pub fn mark_nolonger_use(&mut self, value_id: ValueId) {
+        let all_users = self.value_user.get(&value_id).unwrap().clone();
+        self.value_user.remove(&value_id);
+        for user in all_users {
+            if let Some(users) = self.value_using.get_mut(&user) {
+                users.retain(|&x| x != value_id);
+            }
+        }
+    }
+
+    pub fn mark_using(&mut self, user: ValueId, used: ValueId) {
+        self.value_using
+            .entry(user)
+            .or_insert_with(Vec::new)
+            .push(used);
+        self.value_user
+            .entry(used)
+            .or_insert_with(Vec::new)
+            .push(user);
     }
 }
 
