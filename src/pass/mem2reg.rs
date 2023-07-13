@@ -11,8 +11,10 @@ pub struct Mem2Reg<'a> {
     module: &'a mut Module,
 
     cur_func: Option<ValueId>,
-    // Map<AllocaInst, Map<BasicBlock, Value>>
+    // AllocaInst -> Map<BasicBlock, Value>>
     var_defs: HashMap<ValueId, HashMap<ValueId, ValueId>>,
+    // PhiInst -> Value
+    dead_phis: HashMap<ValueId, ValueId>,
 }
 
 impl Mem2Reg<'_> {
@@ -21,6 +23,7 @@ impl Mem2Reg<'_> {
             module: module,
             cur_func: None,
             var_defs: HashMap::new(),
+            dead_phis: HashMap::new(),
         }
     }
 
@@ -63,8 +66,7 @@ impl Mem2Reg<'_> {
                         // var ptr = (AllocaInst)load.getPtr();
                         let var = self.read_var(bb_id, load_inst.src);
                         // // inst的use就不用移除了，因为另外一边是alloca，之后也会被移除。
-                        // inst.replaceAllUseWith(var);
-                        // it.remove();
+                        self.module.replace_value(inst_id, var);
                         false
                     } else if let InstValue::Store(store_inst) = inst {
                         // if store dst is not promotable, keep it
@@ -90,7 +92,35 @@ impl Mem2Reg<'_> {
         self.cur_func = None;
     }
 
-    fn read_var(&self, bb_id: ValueId, alloca_id: ValueId) {}
+    fn read_var(&self, bb_id: ValueId, alloca_id: ValueId) -> ValueId {
+        let ptr = alloca_id;
+        let defs = self.var_defs.get(&ptr);
+        if defs.is_none() {
+            unreachable!("alloca_id should be in var_defs");
+        }
+
+        let defs = defs.unwrap();
+        let def_in_cur_bb = defs.get(&bb_id);
+        if let Some(def) = def_in_cur_bb {
+            return self.find_in_dead_phis(def.clone());
+        }
+
+        return self.read_var_recursive(bb_id, ptr);
+    }
+
+    fn read_var_recursive(&self, bb_id: ValueId, alloca_id: ValueId) -> ValueId {
+        unimplemented!()
+    }
+
+    fn find_in_dead_phis(&self, def: ValueId) -> ValueId {
+        // return def, if def is not a PhiInst
+        let def_inst = self.module.get_inst(def.clone());
+        if !matches!(def_inst, InstValue::Phi(_)) {
+            return def;
+        }
+
+        return def.clone();
+    }
 
     // 记录 alloca_id 变量在 bb_id 基本块中曾经被设置值为 val_id
     fn write_var(&mut self, bb_id: ValueId, alloca_id: ValueId, val_id: ValueId) {
@@ -105,6 +135,13 @@ impl Mem2Reg<'_> {
         }
     }
 
+    // 这段代码的作用是在一个控制流图（Control Flow Graph, CFG）中寻找一个值的最终定义。
+    //
+    // 如果传入的值不是 PhiInst 类型的话，就直接返回这个值，因为它不是在 CFG 中定义的。如果这个值是一个已经被标记为“死亡”的 PhiInst，就返回这个 PhiInst 自己，因为它没有实际意义，可以被删除。否则，就递归地查找这个值的最终定义。
+    //
+    // 如果这个值是一个 PhiInst，且被标记为“死亡”，就需要使用路径压缩（path compression）算法，将这个 PhiInst 和它的所有“死亡”后继节点都指向它们的最终定义。这样做的目的是为了在 CFG 中去除这些没有实际意义的节点，从而简化 CFG 的结构。
+    //
+    // 最后，如果找到的最终定义是一个 PhiInst，但没有被标记为“死亡”，则返回这个 PhiInst，因为它是 CFG 中的一个有效节点。
     pub fn find_promotables(&self) -> Vec<ValueId> {
         let mut promotables = Vec::new();
 
