@@ -1,3 +1,7 @@
+use std::collections::VecDeque;
+
+use crate::{ast::*, ir::*, scope::*};
+use log::trace;
 use std::{clone, collections::HashMap};
 
 use crate::{ast::*, ir::*, scope::*};
@@ -151,15 +155,90 @@ impl Builder {
             .sym2def
             .insert(var_decl.sema_ref.as_ref().unwrap().symbol_id, global_var_id);
     }
+
+    pub fn build_i32_val(&mut self, val: i32) -> ValueId {
+        let value = Value::Const(ConstValue::Int(ConstInt {
+            ty: Type::Builtin(BuiltinType::Int),
+            value: val as i64,
+        }));
+        self.alloc_value(value)
+    }
+
+    pub fn build_array_init_val(
+        &mut self,
+        ptr: ValueId,
+        // array_init_val: &ArrayInitVal,
+        deque: &mut VecDeque<InitVal>,
+        type_: &ConstantArrayType,
+    ) {
+        // let mut queue = VecDeque::from(array_init_val.0.clone());
+        let i32_zero_id = self.build_i32_val(0);
+
+        let dim = type_.size;
+        let elem_type = type_.element_type.as_ref();
+        match elem_type {
+            Type::Array(at) => {
+                for i in 0..dim {
+                    let i32_i_id = self.build_i32_val(i as i32);
+                    if let ArrayType::Constant(const_at) = at {
+                        // let iv_ = array_init_val.0.get(i);
+                        let iv_ = deque.front().cloned();
+                        if let Some(iv) = iv_ {
+                            let gep_inst = GetElementPtrInst {
+                                ty: Type::Array(ArrayType::Constant(type_.clone())).into(),
+                                pointer: ptr,
+                                indices: vec![i32_zero_id, i32_i_id],
+                            };
+                            let gep_id = self.alloc_value(gep_inst.into());
+                            self.cur_bb_mut().insts.push(gep_id);
+                            match iv {
+                                InitVal::Array(array_iv) => {
+                                    // let mut queue = VecDeque::from(array_iv.0.clone());
+                                    deque.pop_front();
+                                    let mut sub_deque = VecDeque::from(array_iv.0.clone());
+                                    self.build_array_init_val(gep_id, &mut sub_deque, const_at);
+                                }
+                                InitVal::Expr(expr) => {
+                                    self.build_array_init_val(gep_id, deque, const_at);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                for i in 0..dim {
+                    let i32_i_id = self.build_i32_val(i as i32);
+                    // let iv = array_init_val.0.get(i);
+                    let iv_ = deque.pop_front();
+                    if let Some(iv) = iv_ {
+                        let init_val = self.build_init_val(&iv, elem_type);
+
+                        let gep_inst = GetElementPtrInst {
+                            ty: Type::Array(ArrayType::Constant(type_.clone())).into(),
+                            pointer: ptr,
+                            indices: vec![i32_zero_id, i32_i_id],
+                        };
+                        let gep_id = self.alloc_value(gep_inst.into());
+                        self.cur_bb_mut().insts.push(gep_id);
+
+                        let store_inst = StoreInst {
+                            value: init_val,
+                            ptr: gep_id,
+                        };
+                        let store_id = self.alloc_value(store_inst.into());
+                        self.cur_bb_mut().insts.push(store_id);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn build_init_val(&mut self, init_val: &InitVal, type_: &Type) -> ValueId {
         match init_val {
             InitVal::Expr(expr) => self.build_expr(expr, false),
             InitVal::Array(array_init_val) => {
-                let _ty = Type::Array(ArrayType::Constant(ConstantArrayType {
-                    element_type: Box::new(type_.clone()), // Replace with the correct element type
-                    size: array_init_val.0.len() as usize,
-                    size_info: None,
-                }));
+                unreachable!();
 
                 // let values = array_init_val
                 //     .0
@@ -170,7 +249,6 @@ impl Builder {
                 // let const_array = ConstArray { ty, values };
                 // let const_id = self.alloc_value(Value::Const(ConstValue::Array(const_array)));
                 // const_id
-                todo!()
             }
         }
     }
@@ -231,15 +309,29 @@ impl Builder {
     pub fn build_var_decls_statement(&mut self, var_decls_stmt: &VarDecls) {
         for decl in &var_decls_stmt.decls {
             let alloca_id = self.spawn_alloca_inst(decl.name.clone(), decl.type_.clone());
+            let decl_ty = decl.type_.clone();
             match &decl.init {
                 Some(init_val) => {
-                    let init_val_id = self.build_init_val(init_val, &decl.type_);
-                    let store_inst = StoreInst {
-                        value: init_val_id,
-                        ptr: alloca_id,
-                    };
-                    let store_id = self.alloc_value(store_inst.into());
-                    self.cur_bb_mut().insts.push(store_id);
+                    match decl_ty {
+                        Type::Array(at) => {
+                            if let ArrayType::Constant(const_at) = at {
+                                if let InitVal::Array(array_init_val) = init_val {
+                                    let mut deque = VecDeque::from(array_init_val.0.clone());
+                                    // self.build_array_init_val(alloca_id, array_init_val, &const_at);
+                                    self.build_array_init_val(alloca_id, &mut deque, &const_at);
+                                }
+                            }
+                        }
+                        _ => {
+                            let init_val_id = self.build_init_val(init_val, &decl.type_);
+                            let store_inst = StoreInst {
+                                value: init_val_id,
+                                ptr: alloca_id,
+                            };
+                            let store_id = self.alloc_value(store_inst.into());
+                            self.cur_bb_mut().insts.push(store_id);
+                        }
+                    }
                     self.module
                         .sym2def
                         .insert(decl.sema_ref.as_ref().unwrap().symbol_id, alloca_id);

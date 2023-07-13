@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::{ir::ValueId, sema::SemaRef};
 
 #[derive(Debug, PartialEq, Clone)]

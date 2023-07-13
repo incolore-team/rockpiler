@@ -99,14 +99,37 @@ impl<'a> Printer<'a> {
             InstValue::Load(inst) => self.print_load_inst(val_id, inst),
             InstValue::Store(inst) => self.print_store_inst(inst),
             InstValue::Alloca(inst) => self.print_alloca_inst(val_id, inst),
+            InstValue::Gep(inst) => self.print_gep_inst(val_id, inst),
             InstValue::Branch(inst) => self.print_branch_inst(val_id, inst),
             InstValue::Jump(inst) => self.print_jump_inst(val_id, inst),
-            InstValue::Gep(_) => todo!(),
             InstValue::Return(inst) => self.print_ret_inst(val_id, inst),
             InstValue::Call(inst) => self.print_call_inst(val_id, inst),
             InstValue::Phi(_) => todo!(),
             InstValue::Cast(_) => todo!(),
         }
+    }
+
+    pub fn print_gep_inst(&mut self, val_id: &ValueId, inst: &GetElementPtrInst) {
+        let ptr_val = Value::resolve(inst.pointer, self.module);
+        let index_vals: Vec<_> = inst
+            .indices
+            .iter()
+            .map(|id| Value::resolve(*id, self.module))
+            .collect();
+
+        print!(
+            "{} = getelementptr {}, ptr {}",
+            self.resolve_name(&val_id),
+            self.format_type(&inst.ty),
+            self.format_value(&inst.pointer, ptr_val)
+        );
+        for i in 0..index_vals.len() {
+            print!(
+                ", i32 {}",
+                self.format_value(&inst.indices[i], index_vals[i])
+            );
+        }
+        println!();
     }
 
     pub fn print_branch_inst(&mut self, _val_id: &ValueId, inst: &BranchInst) {
@@ -147,7 +170,7 @@ impl<'a> Printer<'a> {
     pub fn print_store_inst(&mut self, inst: &StoreInst) {
         let src_val = Value::resolve(inst.value, self.module);
         let dst_val = Value::resolve(inst.ptr, self.module);
-        let ty = Value::ty(dst_val);
+        let ty = Value::ty(src_val);
         print!(
             "store {} {}, ptr {}",
             self.format_type(&ty),
