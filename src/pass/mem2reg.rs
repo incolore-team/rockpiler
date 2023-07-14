@@ -1,6 +1,12 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    default,
+};
 
-use crate::ir::{AllocaInst, BasicBlockValue, InstValue, Module, ValueId};
+use crate::{
+    ast::Type,
+    ir::{AllocaInst, BasicBlockValue, ConstValue, InstValue, Module, ValueId},
+};
 
 pub fn run(module: &mut Module) {
     let mut pass = Mem2Reg::new(module);
@@ -15,6 +21,17 @@ pub struct Mem2Reg<'a> {
     var_defs: HashMap<ValueId, HashMap<ValueId, ValueId>>,
     // PhiInst -> Value
     dead_phis: HashMap<ValueId, ValueId>,
+    // 暂未加入 bb 的 phi
+    pending_phis: HashSet<ValueId>,
+    incomplete_phis: Vec<IncompletePhi>,
+    // 已经遍历过的基本块
+    filled_bbs: HashSet<ValueId>,
+}
+
+struct IncompletePhi {
+    phi: ValueId,
+    bb_id: ValueId,
+    alloca_id: ValueId,
 }
 
 impl Mem2Reg<'_> {
@@ -24,6 +41,9 @@ impl Mem2Reg<'_> {
             cur_func: None,
             var_defs: HashMap::new(),
             dead_phis: HashMap::new(),
+            pending_phis: HashSet::new(),
+            incomplete_phis: Vec::new(),
+            filled_bbs: HashSet::new(),
         }
     }
 
@@ -36,8 +56,6 @@ impl Mem2Reg<'_> {
     pub fn run_on_func(&mut self, func_val_id: ValueId) {
         self.cur_func = Some(func_val_id);
         {
-            let mut filled_bbs: Vec<ValueId> = Vec::new();
-
             let func = self.module.get_func(func_val_id);
             if func.is_external {
                 return;
@@ -49,7 +67,7 @@ impl Mem2Reg<'_> {
             }
 
             for (_, bb_id) in func.bbs.bbs.clone() {
-                if filled_bbs.contains(&bb_id) {
+                if self.filled_bbs.contains(&bb_id) {
                     unreachable!("bb_id should not be filled yet");
                 }
 
@@ -76,7 +94,7 @@ impl Mem2Reg<'_> {
                         let store_target = store_inst.ptr;
                         let store_val = store_inst.value;
                         self.write_var(bb_id, store_target, store_val);
-                        self.module.mark_nolonger_use(inst_id);
+                        self.module.mark_nolonger_used(inst_id);
                         // inst.removeAllOperandUseFromValue();
                         false
                     } else {
@@ -86,7 +104,7 @@ impl Mem2Reg<'_> {
 
                 self.module.get_bb_mut(bb_id).insts = bb.insts.clone();
 
-                filled_bbs.push(bb_id.clone());
+                self.filled_bbs.insert(bb_id.clone());
             }
         }
         self.cur_func = None;
@@ -108,8 +126,47 @@ impl Mem2Reg<'_> {
         return self.read_var_recursive(bb_id, ptr);
     }
 
-    fn read_var_recursive(&self, bb_id: ValueId, alloca_id: ValueId) -> ValueId {
-        unimplemented!()
+    fn read_var_recursive(&mut self, bb_id: ValueId, alloca_id: ValueId) -> ValueId {
+        let preds = self.module.get_bb_preds(bb_id);
+        let val_id;
+        if !self.is_bb_sealed(bb_id) {
+            let phi_val = self.create_incomplete_phi(alloca_id, bb_id);
+            self.incomplete_phis.push(IncompletePhi {
+                phi: phi_val.clone(),
+                bb_id: bb_id,
+                alloca_id: alloca_id,
+            });
+            val_id = phi_val;
+        } else if preds.len() == 1 {
+            let pred = preds[0];
+            val_id = self.read_var(pred, alloca_id);
+        } else {
+            // Break potential cycles with operandless phi
+            let phi_id = self.create_incomplete_phi(alloca_id, bb_id);
+            self.write_var(bb_id, alloca_id, phi_id.clone());
+            val_id = self.add_phi_operands(phi_id, bb_id, alloca_id)
+        }
+        self.write_var(bb_id, alloca_id, val_id);
+        val_id
+    }
+
+    fn create_incomplete_phi(&mut self, alloca_id: ValueId, bb_id: ValueId) -> ValueId {
+        let alloca = self.module.get_inst(alloca_id);
+        let ty = alloca.ty();
+        let phi = self.module.alloc_phi_inst(ty); // todo: set parent for it
+        phi
+    }
+
+    /// 如果基本块的所有前驱都已经遍历过，则返回 true
+    fn is_bb_sealed(&self, bb_id: ValueId) -> bool {
+        let preds = self.module.get_bb_preds(bb_id);
+
+        for pred in preds {
+            if !self.filled_bbs.contains(&pred) {
+                return false;
+            }
+        }
+        return true;
     }
 
     fn find_in_dead_phis(&mut self, def: ValueId) -> ValueId {
@@ -136,6 +193,73 @@ impl Mem2Reg<'_> {
         }
 
         return def.clone();
+    }
+
+    pub fn add_phi_operands(
+        &mut self,
+        phi_id: ValueId,
+        bb_id: ValueId,
+        alloca_id: ValueId,
+    ) -> ValueId {
+        for pred in self.module.get_bb_preds(bb_id) {
+            let val = self.read_var(pred, alloca_id);
+            assert_eq!(
+                self.module.get_inst(val).ty(),
+                self.module.get_inst(phi_id).ty()
+            );
+            self.module.add_phi_incoming(phi_id, bb_id, val)
+        }
+        return self.try_remove_trivial_phi(phi_id, alloca_id);
+    }
+
+    /// 移除“平凡（trivial）” Phi 函数节点的算法。所谓“平凡”指的是这个 Phi 函数节点
+    /// 的所有操作数（operands）都是同一个值（Value），或者都是该 Phi 函数节点自己（phi）。
+    pub fn try_remove_trivial_phi(&mut self, phi_id: ValueId, alloca_id: ValueId) -> ValueId {
+        let phi = self.module.get_inst(phi_id).as_phi();
+        let mut same_val = None;
+        let mut undef = false;
+        for (opr_id, _bb_id) in phi.incomings.clone() {
+            if (same_val.is_some() && opr_id == same_val.unwrap()) || opr_id == phi_id {
+                continue;
+            }
+            if same_val.is_some() {
+                return phi_id;
+            } else {
+                same_val = Some(opr_id);
+            }
+        }
+
+        if same_val.is_none() {
+            // assert self.module.value_user[phi_id].is_empty()
+            undef = true;
+            same_val = Some(self.get_undef_value(self.module.get_inst(phi_id).ty()));
+        }
+
+        let mut to_recursive = Vec::new();
+        for user_id in self.module.value_user[&phi_id].clone() {
+            // if user is another phi
+            if let InstValue::Phi(_) = self.module.get_inst(user_id) {
+                to_recursive.push(user_id);
+            }
+        }
+
+        self.module.replace_value(phi_id, same_val.unwrap());
+        self.module.remove_phi_all_operands(phi_id);
+        self.pending_phis.remove(&phi_id);
+
+        if !undef {
+            self.dead_phis.insert(phi_id, same_val.unwrap());
+        }
+
+        for user_id in to_recursive {
+            self.try_remove_trivial_phi(user_id, alloca_id);
+        }
+
+        same_val.unwrap()
+    }
+
+    fn get_undef_value(&mut self, ty: Type) -> ValueId {
+        return self.module.alloc_value(ConstValue::zero_of(ty).into());
     }
 
     // 记录 alloca_id 变量在 bb_id 基本块中曾经被设置值为 val_id

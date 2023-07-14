@@ -181,7 +181,7 @@ impl Module {
     ///
     /// 将移除所有对它的使用记录
     /// 调用前确保没有任何指令依赖于该 Value
-    pub fn mark_nolonger_use(&mut self, value_id: ValueId) {
+    pub fn mark_nolonger_used(&mut self, value_id: ValueId) {
         let tmp = self.value_user.get(&value_id);
         if tmp.is_none() {
             panic!("value {:?} is not used", value_id);
@@ -242,6 +242,33 @@ impl Module {
         self.value_parent.insert(child, parent);
     }
 
+    pub fn remove_phi_all_operands(&mut self, phi_id: ValueId) {
+        let phi_value = self.values.get_mut(phi_id).unwrap();
+        match phi_value {
+            Value::Instruction(InstValue::Phi(phi_inst)) => {
+                phi_inst.incomings.iter().for_each(|(value_id, bb_id)| {
+                    self.value_user
+                        .get_mut(value_id)
+                        .unwrap()
+                        .retain(|&x| x != phi_id);
+                    self.value_user
+                        .get_mut(bb_id)
+                        .unwrap()
+                        .retain(|&x| x != phi_id);
+                    self.value_using
+                        .get_mut(&phi_id)
+                        .unwrap()
+                        .retain(|&x| x != *value_id);
+                    self.value_using
+                        .get_mut(&phi_id)
+                        .unwrap()
+                        .retain(|&x| x != *bb_id);
+                });
+            }
+            _ => panic!("expect a phi instruction"),
+        }
+    }
+
     pub fn spawn_load_inst(&mut self, src: ValueId) -> ValueId {
         let load_inst = LoadInst {
             ty: self.values.get(src).unwrap().ty(),
@@ -253,6 +280,18 @@ impl Module {
 
         self.cur_bb_mut().insts.push(val_id);
         val_id
+    }
+
+    pub fn add_phi_incoming(&mut self, phi_id: ValueId, bb_id: ValueId, value_id: ValueId) {
+        let phi_value = self.values.get_mut(phi_id).unwrap();
+        match phi_value {
+            Value::Instruction(InstValue::Phi(phi_inst)) => {
+                phi_inst.incomings.push((value_id, bb_id));
+                self.mark_using(phi_id, value_id);
+                self.mark_using(phi_id, bb_id);
+            }
+            _ => panic!("expect a phi"),
+        }
     }
 
     pub fn spawn_call_inst(&mut self, func: ValueId, args: Vec<ValueId>) -> ValueId {
@@ -317,6 +356,30 @@ impl Module {
         self.cur_bb_mut().insts.push(ret_id);
         self.mark_parent(ret_id, self.cur_bb.unwrap());
         ret_id
+    }
+
+    pub fn alloc_phi_inst(&mut self, ty: Type) -> ValueId {
+        let phi = PhiInst {
+            ty,
+            incomings: Vec::new(),
+        };
+        let phi_id = self.alloc_value(phi.into());
+        phi_id
+    }
+
+    pub fn spawn_phi_inst(&mut self, ty: Type, incomings: Vec<(ValueId, ValueId)>) -> ValueId {
+        let phi = PhiInst {
+            ty,
+            incomings: incomings.clone(),
+        };
+        let phi_id = self.alloc_value(phi.into());
+        for (value, bb) in incomings {
+            self.mark_using(phi_id, value);
+            self.mark_using(phi_id, bb);
+        }
+        self.cur_bb_mut().insts.push(phi_id);
+        self.mark_parent(phi_id, self.cur_bb.unwrap());
+        phi_id
     }
 
     pub fn alloc_br_inst(&mut self, cond: ValueId, then_bb: ValueId, else_bb: ValueId) -> ValueId {
@@ -589,6 +652,83 @@ impl InstValue {
             InstValue::Call(inst) => inst.ty.clone(),
             InstValue::Phi(inst) => inst.ty.clone(),
             InstValue::Cast(inst) => inst.new_ty.clone(),
+        }
+    }
+
+    pub fn as_infix_op(&self) -> &BinaryOperator {
+        match self {
+            InstValue::InfixOp(op) => op,
+            _ => panic!("expect an infix op"),
+        }
+    }
+
+    pub fn as_load(&self) -> &LoadInst {
+        match self {
+            InstValue::Load(inst) => inst,
+            _ => panic!("expect a load inst"),
+        }
+    }
+
+    pub fn as_store(&self) -> &StoreInst {
+        match self {
+            InstValue::Store(inst) => inst,
+            _ => panic!("expect a store inst"),
+        }
+    }
+
+    pub fn as_alloca(&self) -> &AllocaInst {
+        match self {
+            InstValue::Alloca(inst) => inst,
+            _ => panic!("expect an alloca inst"),
+        }
+    }
+
+    pub fn as_branch(&self) -> &BranchInst {
+        match self {
+            InstValue::Branch(inst) => inst,
+            _ => panic!("expect a branch inst"),
+        }
+    }
+
+    pub fn as_jump(&self) -> &JumpInst {
+        match self {
+            InstValue::Jump(inst) => inst,
+            _ => panic!("expect a jump inst"),
+        }
+    }
+
+    pub fn as_gep(&self) -> &GetElementPtrInst {
+        match self {
+            InstValue::Gep(inst) => inst,
+            _ => panic!("expect a gep inst"),
+        }
+    }
+
+    pub fn as_return(&self) -> &ReturnInst {
+        match self {
+            InstValue::Return(inst) => inst,
+            _ => panic!("expect a return inst"),
+        }
+    }
+
+    pub fn as_call(&self) -> &CallInst {
+        match self {
+            InstValue::Call(inst) => inst,
+            _ => panic!("expect a call inst"),
+        }
+    }
+
+    pub fn as_phi(&self) -> &PhiInst {
+        match self {
+            InstValue::Phi(inst) => inst,
+            _ => panic!("expect a phi inst"),
+        }
+    }
+
+    pub fn as_cast(&self) -> &CastInst {
+        match self {
+            InstValue::Cast(inst) => inst,
+            _ => panic!("expect a cast inst"),
         }
     }
 
@@ -979,12 +1119,12 @@ impl Into<Value> for TermInst {
 #[derive(Debug, Clone)]
 pub struct PhiInst {
     pub ty: Type,
-    pub incoming: Vec<(ValueId, ValueId)>,
+    pub incomings: Vec<(ValueId, ValueId)>, // preds. (value, bb)
 }
 
 impl PhiInst {
     pub fn replace_operands(&mut self, old_value_id: ValueId, new_value_id: ValueId) {
-        for (value, _) in &mut self.incoming {
+        for (value, _) in &mut self.incomings {
             if *value == old_value_id {
                 *value = new_value_id;
             }
