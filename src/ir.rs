@@ -6,7 +6,7 @@ use crate::{
 };
 use id_arena::Arena;
 use linked_hash_map::LinkedHashMap;
-use log::debug;
+use log::{debug, warn};
 
 pub type ValueId = id_arena::Id<Value>;
 /// 一个模块，相当于编译单元的 IR 表示
@@ -75,6 +75,14 @@ impl Module {
         }
     }
 
+    pub fn get_users_of(&self, val_id: ValueId) -> Vec<ValueId> {
+        let users = self.value_user.get(&val_id);
+        if users.is_none() {
+            return vec![];
+        }
+        users.unwrap().clone()
+    }
+
     pub fn get_bb(&self, bb_id: ValueId) -> &BasicBlockValue {
         match &self.values[bb_id] {
             Value::BasicBlock(bb) => bb,
@@ -97,11 +105,11 @@ impl Module {
                         if br.then_bb == bb_id {
                             continue;
                         }
-                        let br_bb = self.value_parent[&br.then_bb];
+                        let br_bb = self.value_parent[&user_id];
                         preds.push(br_bb);
                     }
                     InstValue::Jump(jmp) => {
-                        let jmp_bb = self.value_parent[&jmp.bb];
+                        let jmp_bb = self.value_parent[&user_id];
                         preds.push(jmp_bb);
                     }
                     _ => panic!("expect a branch or jump instruction"),
@@ -145,6 +153,10 @@ impl Module {
             Value::GlobalVariable(gv) => gv,
             _ => panic!("expect a global variable"),
         }
+    }
+
+    pub fn get_value(&self, val_id: ValueId) -> &Value {
+        &self.values[val_id]
     }
 
     pub fn alloc_value(&mut self, val: Value) -> ValueId {
@@ -259,12 +271,23 @@ impl Module {
 
     /// 替换一个 Value 为另一个 Value
     ///
+    /// 把所有对 value 的使用，替换为对 new_value 的使用，并清空 value 自己的 uses 列表。
+    ///
     /// 这意味着旧的 Value 不再被使用，而新的 Value 被使用
     /// 除了更新记录，此函数还负责将所有指令中对词 Value 的使用替换为新的 Value
     pub fn replace_value(&mut self, value_id: ValueId, new_value_id: ValueId) {
+        debug!(
+            "replace old=[{}] with new=[{}] \n\twhere old is {}, and new is {}",
+            value_id.index(),
+            new_value_id.index(),
+            self.inspect_value(value_id),
+            self.inspect_value(new_value_id)
+        );
         let tmp = self.value_user.get(&value_id);
         if tmp.is_none() {
-            panic!("value {:?} is not used", value_id);
+            warn!("value {} is not used", self.inspect_value(value_id));
+            self.value_using.remove(&value_id);
+            return;
         }
 
         let all_users = tmp.unwrap().clone();
@@ -283,6 +306,8 @@ impl Module {
             }
             _ => {}
         });
+
+        self.value_using.remove(&value_id);
     }
 
     pub fn mark_using(&mut self, user: ValueId, used: ValueId) {
@@ -1178,7 +1203,7 @@ impl Into<Value> for TermInst {
     }
 }
 
-/// phi <ty> [ <val0>, <label0>], ...
+/// %x = phi <ty> [ <val0>, <label0>], ...
 #[derive(Debug, Clone)]
 pub struct PhiInst {
     pub ty: Type,

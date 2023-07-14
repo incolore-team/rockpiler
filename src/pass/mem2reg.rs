@@ -128,6 +128,7 @@ impl Mem2Reg<'_> {
         }
     }
 
+    /// var 表示的是任何一个变量，phi、alloca、const int
     fn read_var(&mut self, bb_id: ValueId, alloca_id: ValueId) -> ValueId {
         let ptr = alloca_id;
         let defs = self.var_defs.get(&ptr);
@@ -227,7 +228,7 @@ impl Mem2Reg<'_> {
         for pred in self.module.get_bb_preds(bb_id) {
             let val = self.read_var(pred, alloca_id);
             assert_eq!(
-                self.module.get_inst(val).ty(),
+                self.module.get_value(val).ty(),
                 self.module.get_inst(phi_id).ty()
             );
             self.module.add_phi_incoming(phi_id, bb_id, val)
@@ -259,7 +260,7 @@ impl Mem2Reg<'_> {
         }
 
         let mut to_recursive = Vec::new();
-        for user_id in self.module.value_user[&phi_id].clone() {
+        for user_id in self.module.get_users_of(phi_id).clone() {
             // if user is another phi
             if let InstValue::Phi(_) = self.module.get_inst(user_id) {
                 to_recursive.push(user_id);
