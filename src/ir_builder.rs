@@ -503,17 +503,11 @@ impl Builder {
                     PrefixOp::Pos => InfixOp::Add,
                     PrefixOp::Neg => InfixOp::Sub,
                 };
-                let zero = ConstValue::zero_of(prefix_expr.infer_ty.as_ref().unwrap().clone());
+                let ty = prefix_expr.infer_ty.as_ref().unwrap().clone();
+                let zero = ConstValue::zero_of(ty.clone());
                 let zero_id = self.module.alloc_value(zero.into());
-                let bin_op = BinaryOperator {
-                    ty: prefix_expr.infer_ty.as_ref().unwrap().clone(),
-                    op: converted_infix_op,
-                    lhs: zero_id,
-                    rhs,
-                };
-                let val_id = self.module.alloc_value(bin_op.into());
-                self.module.cur_bb_mut().insts.push(val_id);
-                val_id // returns the binary operator value id
+                self.module
+                    .spawn_binop_inst(ty, converted_infix_op, zero_id, rhs)
             }
             Expr::Postfix(postfix_expr) => {
                 let _lhs = self.build_expr(&postfix_expr.lhs, false);
