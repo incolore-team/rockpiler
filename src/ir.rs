@@ -6,6 +6,7 @@ use crate::{
 };
 use id_arena::Arena;
 use linked_hash_map::LinkedHashMap;
+use log::debug;
 
 pub type ValueId = id_arena::Id<Value>;
 /// 一个模块，相当于编译单元的 IR 表示
@@ -37,6 +38,7 @@ pub struct Module {
 
     // value -> users of the value
     pub value_user: HashMap<ValueId, Vec<ValueId>>,
+    // value -> values used by the value
     pub value_using: HashMap<ValueId, Vec<ValueId>>,
     // value -> name of the value
     pub value_name: HashMap<ValueId, String>,
@@ -177,6 +179,31 @@ impl Module {
     pub fn set_cur_func(&mut self, func: ValueId) {
         self.cur_func = Some(func);
     }
+
+    pub fn inspect_value(&self, value_id: ValueId) -> String {
+        let value = &self.values[value_id];
+        match value {
+            Value::Instruction(inst) => {
+                format!("[{}] inst: {:?}", value_id.index(), inst)
+            }
+            Value::BasicBlock(bb) => {
+                format!("[{}] bb: {:?}", value_id.index(), bb)
+            }
+            Value::Function(func) => {
+                format!("[{}] func: {:?}", value_id.index(), func)
+            }
+            Value::GlobalVariable(gv) => {
+                format!("[{}] gv: {:?}", value_id.index(), gv)
+            }
+            Value::Const(c) => {
+                format!("[{}] c: {:?}", value_id.index(), c)
+            }
+            Value::VariableValue(var) => {
+                format!("[{}] var: {:?}", value_id.index(), var)
+            }
+        }
+    }
+
     /// 对一个 Value 做不再使用处理
     ///
     /// 将移除所有对它的使用记录
@@ -184,6 +211,7 @@ impl Module {
     pub fn mark_nolonger_used(&mut self, value_id: ValueId) {
         let tmp = self.value_user.get(&value_id);
         if tmp.is_none() {
+            println!("{}", self.inspect_value(value_id));
             panic!("value {:?} is not used", value_id);
         }
 
@@ -197,6 +225,36 @@ impl Module {
         }
 
         // todo: 验证确实没有任何指令依赖于该 Value
+    }
+
+    pub fn mark_nolonger_using(&mut self, user_id: ValueId, used_id: ValueId) {
+        debug!("[{}] nolonger use [{}]", user_id.index(), used_id.index());
+        debug!(
+            "user: {:?}, used: {:?}",
+            self.inspect_value(user_id),
+            self.inspect_value(used_id)
+        );
+        if let Some(used_vals) = self.value_using.get_mut(&user_id) {
+            used_vals.retain(|&x| x != used_id);
+            self.value_user
+                .get_mut(&used_id)
+                .unwrap()
+                .retain(|&x| x != user_id);
+        }
+    }
+
+    pub fn mark_nolonger_using_any(&mut self, user_id: ValueId) {
+        debug!("[{}] nolonger use any", user_id.index());
+        debug!("user: {:?}", self.inspect_value(user_id));
+        if let Some(used_vals) = self.value_using.get_mut(&user_id) {
+            for used_id in used_vals.clone() {
+                self.value_user
+                    .get_mut(&used_id)
+                    .unwrap()
+                    .retain(|&x| x != user_id);
+            }
+            used_vals.clear();
+        }
     }
 
     /// 替换一个 Value 为另一个 Value
@@ -228,6 +286,11 @@ impl Module {
     }
 
     pub fn mark_using(&mut self, user: ValueId, used: ValueId) {
+        debug!(
+            "mark_using:\n   {}\n-> {}",
+            self.inspect_value(user),
+            self.inspect_value(used)
+        );
         self.value_using
             .entry(user)
             .or_insert_with(Vec::new)

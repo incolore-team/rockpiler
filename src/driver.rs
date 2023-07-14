@@ -1,6 +1,12 @@
 use log::trace;
 
-use crate::{cli::Args, ir_printer, pass::inst_namer, scope::SymbolTable, sema::ToSemaTrait};
+use crate::{
+    cli::Args,
+    ir_printer,
+    pass::{inst_namer, mem2reg},
+    scope::SymbolTable,
+    sema::ToSemaTrait,
+};
 
 pub fn drive(args: Args) {
     assert!(args.inputs.len() > 0);
@@ -25,6 +31,11 @@ pub fn drive(args: Args) {
         let mut module = crate::ir_builder::build(&mut ast, syms);
         inst_namer::run(&mut module);
         trace!("================== Pre-SSA Module as LLVM IR ==================");
+        ir_printer::print(&mut module);
+        mem2reg::run(&mut module);
+        inst_namer::run(&mut module);
+
+        trace!("================== SSA Module as LLVM IR ==================");
         ir_printer::print(&mut module);
     }
 }

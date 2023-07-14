@@ -1,11 +1,11 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     default,
 };
 
 use crate::{
     ast::Type,
-    ir::{AllocaInst, BasicBlockValue, ConstValue, InstValue, Module, ValueId},
+    ir::{AllocaInst, BasicBlockValue, ConstValue, InstValue, Module, Value, ValueId},
 };
 
 pub fn run(module: &mut Module) {
@@ -23,7 +23,7 @@ pub struct Mem2Reg<'a> {
     dead_phis: HashMap<ValueId, ValueId>,
     // 暂未加入 bb 的 phi
     pending_phis: HashSet<ValueId>,
-    incomplete_phis: Vec<IncompletePhi>,
+    incomplete_phis: VecDeque<IncompletePhi>,
     // 已经遍历过的基本块
     filled_bbs: HashSet<ValueId>,
 }
@@ -31,7 +31,7 @@ pub struct Mem2Reg<'a> {
 struct IncompletePhi {
     phi: ValueId,
     bb_id: ValueId,
-    alloca_id: ValueId,
+    ptr: ValueId,
 }
 
 impl Mem2Reg<'_> {
@@ -42,72 +42,90 @@ impl Mem2Reg<'_> {
             var_defs: HashMap::new(),
             dead_phis: HashMap::new(),
             pending_phis: HashSet::new(),
-            incomplete_phis: Vec::new(),
+            incomplete_phis: VecDeque::new(),
             filled_bbs: HashSet::new(),
         }
     }
 
     pub fn run(&mut self) {
         for (_, func_val_id) in &self.module.functions.clone() {
-            self.run_on_func(func_val_id.to_owned());
+            self.cur_func = Some(func_val_id.clone());
+            self.run_on_func(func_val_id.clone());
+            self.cur_func = None;
         }
     }
 
     pub fn run_on_func(&mut self, func_val_id: ValueId) {
-        self.cur_func = Some(func_val_id);
-        {
-            let func = self.module.get_func(func_val_id);
-            if func.is_external {
-                return;
-            }
-
-            let promotables = self.find_promotables();
-            if promotables.len() == 0 {
-                return;
-            }
-
-            for (_, bb_id) in func.bbs.bbs.clone() {
-                if self.filled_bbs.contains(&bb_id) {
-                    unreachable!("bb_id should not be filled yet");
-                }
-
-                let mut bb = self.module.get_bb(bb_id.to_owned()).clone();
-
-                bb.insts.retain(|inst_id| {
-                    let inst_id = inst_id.clone();
-                    let inst = self.module.get_inst(inst_id);
-                    if let InstValue::Load(load_inst) = inst {
-                        // if load src ptr is not promotable, keep it
-                        if !promotables.contains(&load_inst.src) {
-                            return true;
-                        }
-                        // var ptr = (AllocaInst)load.getPtr();
-                        let var = self.read_var(bb_id, load_inst.src);
-                        // // inst的use就不用移除了，因为另外一边是alloca，之后也会被移除。
-                        self.module.replace_value(inst_id, var);
-                        false
-                    } else if let InstValue::Store(store_inst) = inst {
-                        // if store dst is not promotable, keep it
-                        if !promotables.contains(&store_inst.ptr) {
-                            return true;
-                        }
-                        let store_target = store_inst.ptr;
-                        let store_val = store_inst.value;
-                        self.write_var(bb_id, store_target, store_val);
-                        self.module.mark_nolonger_used(inst_id);
-                        // inst.removeAllOperandUseFromValue();
-                        false
-                    } else {
-                        true
-                    }
-                });
-
-                self.module.get_bb_mut(bb_id).insts = bb.insts.clone();
-
-                self.filled_bbs.insert(bb_id.clone());
-            }
+        let func = self.module.get_func(func_val_id);
+        if func.is_external {
+            return;
         }
-        self.cur_func = None;
+
+        let promotables = self.find_promotables();
+        if promotables.len() == 0 {
+            return;
+        }
+
+        let bbs = func.bbs.bbs.clone();
+        for (_, bb_id) in bbs.clone() {
+            if self.filled_bbs.contains(&bb_id) {
+                unreachable!("bb_id should not be filled yet");
+            }
+
+            let mut bb = self.module.get_bb(bb_id.to_owned()).clone();
+
+            bb.insts.retain(|inst_id| {
+                let inst_id = inst_id.clone();
+                let inst = self.module.get_inst(inst_id);
+                if let InstValue::Load(load_inst) = inst {
+                    // if load src ptr is not promotable, keep it
+                    if !promotables.contains(&load_inst.src) {
+                        return true;
+                    }
+                    // var ptr = (AllocaInst)load.getPtr();
+                    let var = self.read_var(bb_id, load_inst.src);
+                    // // inst的use就不用移除了，因为另外一边是alloca，之后也会被移除。
+                    self.module.replace_value(inst_id, var);
+                    false
+                } else if let InstValue::Store(store_inst) = inst {
+                    // if store dst is not promotable, keep it
+                    if !promotables.contains(&store_inst.ptr) {
+                        return true;
+                    }
+                    let store_target = store_inst.ptr;
+                    let store_val = store_inst.value;
+                    self.write_var(bb_id, store_target, store_val);
+                    self.module.mark_nolonger_using(inst_id, store_target);
+                    // inst.removeAllOperandUseFromValue();
+                    false
+                } else {
+                    true
+                }
+            });
+
+            self.module.get_bb_mut(bb_id).insts = bb.insts.clone();
+
+            self.filled_bbs.insert(bb_id.clone());
+        }
+
+        // 3. 处理incompletePhi
+        while self.incomplete_phis.len() > 0 {
+            let incomplete_phi = self.incomplete_phis.pop_front().unwrap();
+            self.add_phi_operands(incomplete_phi.phi, incomplete_phi.bb_id, incomplete_phi.ptr);
+        }
+
+        // 把所有phi指令加入基本块
+        for phi in self.pending_phis.clone() {
+            let bb_id = self.module.value_parent[&phi];
+            let bb = self.module.get_bb_mut(bb_id);
+            bb.insts.insert(0, phi);
+        }
+
+        // 4. 最后移除alloca
+        for (_, bb_id) in bbs {
+            let bb = self.module.get_bb_mut(bb_id);
+            bb.insts.retain(|inst_id| !promotables.contains(inst_id));
+        }
     }
 
     fn read_var(&mut self, bb_id: ValueId, alloca_id: ValueId) -> ValueId {
@@ -131,10 +149,10 @@ impl Mem2Reg<'_> {
         let val_id;
         if !self.is_bb_sealed(bb_id) {
             let phi_val = self.create_incomplete_phi(alloca_id, bb_id);
-            self.incomplete_phis.push(IncompletePhi {
+            self.incomplete_phis.push_back(IncompletePhi {
                 phi: phi_val.clone(),
                 bb_id: bb_id,
-                alloca_id: alloca_id,
+                ptr: alloca_id,
             });
             val_id = phi_val;
         } else if preds.len() == 1 {
@@ -171,9 +189,14 @@ impl Mem2Reg<'_> {
 
     fn find_in_dead_phis(&mut self, def: ValueId) -> ValueId {
         // return def, if def is not a PhiInst
-        let def_inst = self.module.get_inst(def.clone());
-        if !matches!(def_inst, InstValue::Phi(_)) {
-            return def;
+        // `def` may be a non-inst (like a constant int)
+        let def_val = self.module.values.get(def);
+        match def_val {
+            Some(Value::Instruction(inst)) => match inst {
+                InstValue::Phi(_) => {}
+                _ => return def,
+            },
+            _ => return def,
         }
         // if def is not a dead PhiInst, return def
         if !self.dead_phis.contains_key(&def) {
@@ -305,17 +328,26 @@ impl Mem2Reg<'_> {
 
             for user in users_of_alloca {
                 let user_inst = self.module.get_inst(user);
+
+                let load_inst = match user_inst {
+                    crate::ir::InstValue::Load(load) => Some(load),
+                    _ => None,
+                };
+
+                if load_inst.is_some() {
+                    // ok, promotable if user is a load
+                    continue;
+                }
+
                 let store_inst = match user_inst {
                     crate::ir::InstValue::Store(store) => Some(store),
                     _ => None,
                 };
 
-                let user_is_store_inst = store_inst.is_some();
-                if user_is_store_inst {
+                if store_inst.is_some() {
                     let store_ptr = store_inst.unwrap().ptr;
-                    let store_ptr_is_alloca = store_ptr == inst_id;
-                    if store_ptr_is_alloca {
-                        // ok, promotable
+                    if store_ptr == inst_id {
+                        // ok, promotable if user is a store that stores to this alloca
                         continue;
                     }
                 }
