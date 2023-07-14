@@ -92,7 +92,7 @@ impl Mem2Reg<'_> {
         self.cur_func = None;
     }
 
-    fn read_var(&self, bb_id: ValueId, alloca_id: ValueId) -> ValueId {
+    fn read_var(&mut self, bb_id: ValueId, alloca_id: ValueId) -> ValueId {
         let ptr = alloca_id;
         let defs = self.var_defs.get(&ptr);
         if defs.is_none() {
@@ -112,11 +112,27 @@ impl Mem2Reg<'_> {
         unimplemented!()
     }
 
-    fn find_in_dead_phis(&self, def: ValueId) -> ValueId {
+    fn find_in_dead_phis(&mut self, def: ValueId) -> ValueId {
         // return def, if def is not a PhiInst
         let def_inst = self.module.get_inst(def.clone());
         if !matches!(def_inst, InstValue::Phi(_)) {
             return def;
+        }
+        // if def is not a dead PhiInst, return def
+        if !self.dead_phis.contains_key(&def) {
+            return def;
+        }
+
+        let mut cur = def;
+        let mut compress_todo: Vec<ValueId> = Vec::new();
+        while let Some(next) = self.dead_phis.get(&cur) {
+            compress_todo.push(cur);
+            cur = next.clone();
+        }
+
+        // path compression
+        for phi in compress_todo {
+            self.dead_phis.insert(cur.clone(), phi.clone());
         }
 
         return def.clone();
