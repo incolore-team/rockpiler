@@ -31,11 +31,17 @@ pub struct Module {
     pub builtins: LinkedHashMap<String, ValueId>,
     pub constants: LinkedHashMap<String, ValueId>,
 
+    // 用于 ir 构建
+    cur_func: Option<ValueId>,
+    cur_bb: Option<ValueId>,
+
     // value -> users of the value
     pub value_user: HashMap<ValueId, Vec<ValueId>>,
     pub value_using: HashMap<ValueId, Vec<ValueId>>,
     // value -> name of the value
     pub value_name: HashMap<ValueId, String>,
+    // value -> parent of the value (e.g. inst -> bb)
+    pub value_parent: HashMap<ValueId, ValueId>,
 }
 
 impl Module {
@@ -49,9 +55,12 @@ impl Module {
             functions: LinkedHashMap::new(),
             builtins: LinkedHashMap::new(),
             constants: LinkedHashMap::new(),
+            cur_func: None,
+            cur_bb: None,
             value_user: HashMap::new(),
             value_using: HashMap::new(),
             value_name: HashMap::new(),
+            value_parent: HashMap::new(),
         };
         // module.add_builtin_types();
         module
@@ -69,6 +78,36 @@ impl Module {
             Value::BasicBlock(bb) => bb,
             _ => panic!("expect a basic block"),
         }
+    }
+
+    pub fn get_bb_preds(&self, bb_id: ValueId) -> Vec<ValueId> {
+        let bb_users = self.value_user.get(&bb_id);
+        let mut preds = vec![];
+        if bb_users.is_none() {
+            return preds;
+        }
+        let bb_users = bb_users.unwrap();
+        for user_id in bb_users {
+            let user = &self.values[*user_id];
+            match user {
+                Value::Instruction(inst) => match inst {
+                    InstValue::Branch(br) => {
+                        if br.then_bb == bb_id {
+                            continue;
+                        }
+                        let br_bb = self.value_parent[&br.then_bb];
+                        preds.push(br_bb);
+                    }
+                    InstValue::Jump(jmp) => {
+                        let jmp_bb = self.value_parent[&jmp.bb];
+                        preds.push(jmp_bb);
+                    }
+                    _ => panic!("expect a branch or jump instruction"),
+                },
+                _ => panic!("expect an instruction"),
+            }
+        }
+        preds
     }
 
     pub fn get_func_mut(&mut self, func_id: ValueId) -> &mut FunctionValue {
@@ -106,6 +145,38 @@ impl Module {
         }
     }
 
+    pub fn alloc_value(&mut self, val: Value) -> ValueId {
+        let val_id = self.values.alloc(val);
+        let idx = val_id.index();
+        if idx > 131072 {
+            panic!("too many values");
+        }
+        val_id
+    }
+
+    pub fn cur_bb_mut(&mut self) -> &mut BasicBlockValue {
+        self.get_bb_mut(self.cur_bb.unwrap())
+    }
+
+    pub fn cur_func_mut(&mut self) -> &mut FunctionValue {
+        self.get_func_mut(self.cur_func.unwrap())
+    }
+
+    pub fn cur_bb(&self) -> &BasicBlockValue {
+        self.get_bb(self.cur_bb.unwrap())
+    }
+
+    pub fn cur_func(&self) -> &FunctionValue {
+        self.get_func(self.cur_func.unwrap())
+    }
+
+    pub fn set_insert_point(&mut self, bb: ValueId) {
+        self.cur_bb = Some(bb);
+    }
+
+    pub fn set_cur_func(&mut self, func: ValueId) {
+        self.cur_func = Some(func);
+    }
     /// 对一个 Value 做不再使用处理
     ///
     /// 将移除所有对它的使用记录
@@ -165,6 +236,184 @@ impl Module {
             .entry(used)
             .or_insert_with(Vec::new)
             .push(user);
+    }
+
+    pub fn mark_parent(&mut self, child: ValueId, parent: ValueId) {
+        self.value_parent.insert(child, parent);
+    }
+
+    pub fn spawn_load_inst(&mut self, src: ValueId) -> ValueId {
+        let load_inst = LoadInst {
+            ty: self.values.get(src).unwrap().ty(),
+            src,
+        };
+        let val_id = self.alloc_value(load_inst.into());
+
+        self.mark_using(val_id, src);
+
+        self.cur_bb_mut().insts.push(val_id);
+        val_id
+    }
+
+    pub fn spawn_call_inst(&mut self, func: ValueId, args: Vec<ValueId>) -> ValueId {
+        let func_value = self.values.get(func).unwrap();
+        let call_inst = CallInst {
+            ty: func_value.ty(),
+            func,
+            args,
+        };
+        let val_id = self.alloc_value(call_inst.into());
+
+        self.mark_using(val_id, func);
+
+        self.cur_bb_mut().insts.push(val_id);
+        val_id
+    }
+
+    pub fn spawn_store_inst(&mut self, ptr: ValueId, value: ValueId) -> ValueId {
+        {
+            // make sure ptr is a pointer
+            let inst = self.get_inst(ptr);
+            match inst {
+                InstValue::Alloca(_) => {}
+                _ => panic!("ptr is not a pointer"),
+            }
+        }
+        let store = StoreInst { ptr, value };
+        let store_id = self.alloc_value(store.into());
+
+        self.mark_using(store_id, ptr);
+        self.mark_using(store_id, value);
+
+        self.cur_bb_mut().insts.push(store_id);
+        self.mark_parent(store_id, self.cur_bb.unwrap());
+        store_id
+    }
+
+    pub fn spawn_gep_inst(&mut self, ty: Type, pointer: ValueId, indices: Vec<ValueId>) -> ValueId {
+        let gep = GetElementPtrInst {
+            ty,
+            pointer,
+            indices: indices.clone(),
+        };
+        let gep_id = self.alloc_value(gep.into());
+
+        self.mark_using(gep_id, pointer);
+        for index in indices.clone() {
+            self.mark_using(gep_id, index);
+        }
+
+        self.cur_bb_mut().insts.push(gep_id);
+        self.mark_parent(gep_id, self.cur_bb.unwrap());
+        gep_id
+    }
+
+    pub fn spawn_return_inst(&mut self, value: Option<ValueId>) -> ValueId {
+        let ret = ReturnInst { value };
+        let ret_id = self.alloc_value(ret.into());
+        if let Some(value) = value {
+            self.mark_using(ret_id, value);
+        }
+        self.cur_bb_mut().insts.push(ret_id);
+        self.mark_parent(ret_id, self.cur_bb.unwrap());
+        ret_id
+    }
+
+    pub fn alloc_br_inst(&mut self, cond: ValueId, then_bb: ValueId, else_bb: ValueId) -> ValueId {
+        let br = BranchInst {
+            cond,
+            then_bb,
+            else_bb,
+        };
+        let br_id = self.alloc_value(br.into());
+        self.mark_using(br_id, cond);
+        self.mark_using(br_id, then_bb);
+        self.mark_using(br_id, else_bb);
+        br_id
+    }
+
+    pub fn alloc_jump_inst(&mut self, bb: ValueId) -> ValueId {
+        let jump = JumpInst { bb };
+        let jump_id = self.alloc_value(jump.into());
+        self.mark_using(jump_id, bb);
+        jump_id
+    }
+
+    pub fn spawn_jump_inst(&mut self, bb: ValueId) -> ValueId {
+        let jump_id = self.alloc_jump_inst(bb);
+        self.cur_bb_mut().insts.push(jump_id);
+        self.mark_parent(jump_id, self.cur_bb.unwrap());
+        jump_id
+    }
+
+    pub fn alloc_binop_inst(
+        &mut self,
+        ty: Type,
+        op: InfixOp,
+        lhs: ValueId,
+        rhs: ValueId,
+    ) -> ValueId {
+        let binop = BinaryOperator { ty, op, lhs, rhs };
+        let binop_id = self.alloc_value(binop.into());
+        self.mark_using(binop_id, lhs);
+        self.mark_using(binop_id, rhs);
+        binop_id
+    }
+
+    pub fn spawn_binop_inst(
+        &mut self,
+        ty: Type,
+        op: InfixOp,
+        lhs: ValueId,
+        rhs: ValueId,
+    ) -> ValueId {
+        let binop_id = self.alloc_binop_inst(ty, op, lhs, rhs);
+        self.cur_bb_mut().insts.push(binop_id);
+        self.mark_parent(binop_id, self.cur_bb.unwrap());
+        binop_id
+    }
+
+    pub fn spawn_br_inst(&mut self, cond: ValueId, true_bb: ValueId, false_bb: ValueId) -> ValueId {
+        let br_id = self.alloc_br_inst(cond, true_bb, false_bb);
+        self.cur_bb_mut().insts.push(br_id);
+        self.mark_parent(br_id, self.cur_bb.unwrap());
+        br_id
+    }
+
+    pub fn alloc_basic_block(&mut self) -> ValueId {
+        let bb = BasicBlockValue::default();
+        let bb_id = self.alloc_value(Value::BasicBlock(bb));
+        bb_id
+    }
+    pub fn spawn_basic_block(&mut self) -> ValueId {
+        let bb_id = self.alloc_basic_block();
+        self.cur_func_mut().bbs.append(bb_id);
+        bb_id
+    }
+
+    pub fn spawn_alloca_inst(&mut self, name: String, ty: Type) -> ValueId {
+        let alloca = AllocaInst { name, ty };
+        let alloca_id = self.alloc_value(alloca.into());
+        let entry_bb_id = self.cur_func().bbs.entry_bb();
+
+        // 用于确定插入位置的临时变量
+        let ins_pos;
+
+        // 使用一个新的作用域来查找插入位置
+        {
+            let entry_bb = self.get_bb(entry_bb_id.clone());
+            ins_pos = entry_bb
+                .insts
+                .iter()
+                .position(|inst_id| !matches!(self.get_inst(inst_id.clone()), InstValue::Alloca(_)))
+                .unwrap_or_else(|| entry_bb.insts.len());
+        }
+
+        // 在找到的位置插入新的alloca指令
+        let entry_bb_mut = self.get_bb_mut(entry_bb_id.clone());
+        entry_bb_mut.insts.insert(ins_pos, alloca_id);
+
+        alloca_id
     }
 }
 
