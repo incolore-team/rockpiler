@@ -85,7 +85,11 @@ impl<'a> Printer<'a> {
         let bb = self.module.get_bb(bb_val_id.clone());
         // println!("{}:", name);
         if name != "entry" {
-            println!("{}:", self.resolve_name(&bb_val_id));
+            println!(
+                "{}:                                        ; val_ids=[{}]",
+                self.resolve_name(&bb_val_id),
+                bb_val_id.index()
+            );
         }
         for inst_val_id in &bb.insts {
             let inst = BasicBlockValue::resolve_inst(*inst_val_id, self.module);
@@ -205,13 +209,13 @@ impl<'a> Printer<'a> {
         println!();
     }
     pub fn print_load_inst(&mut self, val_id: &ValueId, inst: &LoadInst) {
-        let src_val = Value::resolve(inst.src, self.module);
+        let src_val = Value::resolve(inst.ptr, self.module);
         let ty = Value::ty(src_val);
         print!(
             "{} = load {}, ptr {}",
             self.resolve_name(&val_id),
             self.format_type(&ty),
-            self.resolve_name(&inst.src)
+            self.resolve_name(&inst.ptr)
         );
         println!();
     }
@@ -224,12 +228,13 @@ impl<'a> Printer<'a> {
         let rhs_val = Value::resolve(inst.rhs, self.module);
         let ty = Value::ty(lhs_val);
         print!(
-            "{} = {} {} {}, {}",
+            "{} = {} {} {}, {}                  ; val_ids: {:?}",
             self.resolve_name(val_id),
             self.format_infix_op(&inst.op),
             self.format_type(&ty),
             self.format_value(&inst.lhs, lhs_val),
-            self.format_value(&inst.rhs, rhs_val)
+            self.format_value(&inst.rhs, rhs_val),
+            vec![val_id.index(), inst.lhs.index(), inst.rhs.index()]
         );
         println!();
     }
@@ -261,9 +266,10 @@ impl<'a> Printer<'a> {
 
     pub fn print_alloca_inst(&self, val_id: &ValueId, inst: &AllocaInst) {
         print!(
-            "{} = alloca {}",
+            "{} = alloca {}                 ; val_ids: {:?}",
             self.resolve_name(val_id),
-            self.format_type(&inst.ty)
+            self.format_type(&inst.ty),
+            vec![val_id.index()]
         );
         println!();
     }

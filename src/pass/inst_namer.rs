@@ -8,6 +8,7 @@ pub fn run(module: &mut Module) {
 pub struct InstNamer<'a> {
     module: &'a mut Module,
     next_id: usize,
+    next_phi_id: usize,
 }
 
 impl InstNamer<'_> {
@@ -15,6 +16,7 @@ impl InstNamer<'_> {
         InstNamer {
             module: module,
             next_id: 0,
+            next_phi_id: 0,
         }
     }
 
@@ -36,6 +38,7 @@ impl InstNamer<'_> {
 
     pub fn visit_function(&mut self, func_val_id: ValueId) {
         self.next_id = 0;
+        self.next_phi_id = 0;
 
         self.visit_params(func_val_id);
 
@@ -72,6 +75,11 @@ impl InstNamer<'_> {
         if !inst.has_output() {
             return;
         }
+        if inst.is_phi() {
+            let name = self.generate_phi_name();
+            self.assign(val_id, name);
+            return;
+        }
         let name = self.generate_local_name();
         self.assign(val_id, name)
     }
@@ -84,6 +92,12 @@ impl InstNamer<'_> {
     pub fn generate_local_name(&mut self) -> String {
         let name = format!("%{}", self.next_id);
         self.next_id += 1;
+        name
+    }
+
+    pub fn generate_phi_name(&mut self) -> String {
+        let name = format!("%.{}", self.next_phi_id);
+        self.next_phi_id += 1;
         name
     }
 

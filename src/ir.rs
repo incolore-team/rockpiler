@@ -91,20 +91,19 @@ impl Module {
     }
 
     pub fn get_bb_preds(&self, bb_id: ValueId) -> Vec<ValueId> {
-        let bb_users = self.value_user.get(&bb_id);
+        let bb_users = self.get_users_of(bb_id);
         let mut preds = vec![];
-        if bb_users.is_none() {
+        if bb_users.is_empty() {
             return preds;
         }
-        let bb_users = bb_users.unwrap();
         for user_id in bb_users {
-            let user = &self.values[*user_id];
+            let user = &self.values[user_id];
             match user {
                 Value::Instruction(inst) => match inst {
                     InstValue::Branch(br) => {
-                        if br.then_bb == bb_id {
-                            continue;
-                        }
+                        // if br.then_bb == bb_id {
+                        //     continue;
+                        // }
                         let br_bb = self.value_parent[&user_id];
                         preds.push(br_bb);
                     }
@@ -165,7 +164,18 @@ impl Module {
         if idx > 131072 {
             panic!("too many values");
         }
+        debug!(
+            "[{}] is allocated: {}",
+            val_id.index(),
+            self.inspect_value(val_id)
+        );
         val_id
+    }
+
+    pub fn spawn_zero_value(&mut self, ty: Type) -> ValueId {
+        let val = ConstValue::zero_of(ty);
+        let id = self.alloc_value(val.into());
+        id
     }
 
     pub fn cur_bb_mut(&mut self) -> &mut BasicBlockValue {
@@ -307,10 +317,12 @@ impl Module {
         let all_users = tmp.unwrap().clone();
         self.value_user.remove(&value_id);
 
-        for user in all_users {
-            if let Some(users) = self.value_using.get_mut(&user) {
-                users.retain(|&x| x != value_id);
-                users.push(new_value_id);
+        // 将所有使用 value_id 的用户，替换为使用 new_value_id
+        // 相当于重新进行 mark_using 操作
+        for cur_user in all_users {
+            if let Some(used_by_users) = self.value_using.get_mut(&cur_user) {
+                used_by_users.retain(|&x| x != value_id);
+                used_by_users.push(new_value_id);
             }
         }
 
@@ -334,12 +346,22 @@ impl Module {
         self.value_using.remove(&value_id);
     }
 
-    pub fn get_parent(&self, value_id: ValueId) -> ValueId {
+    pub fn get_parent_id(&self, value_id: ValueId) -> ValueId {
         let tmp = self.value_parent.get(&value_id);
         if tmp.is_none() {
             panic!("value has no parent: {}", self.inspect_value(value_id));
         }
         tmp.unwrap().clone()
+    }
+
+    pub fn get_parent(&self, value_id: ValueId) -> &BasicBlockValue {
+        let parent_id = self.get_parent_id(value_id);
+        self.values.get(parent_id).unwrap().as_bb().unwrap()
+    }
+
+    pub fn get_parent_mut(&mut self, value_id: ValueId) -> &mut BasicBlockValue {
+        let parent_id = self.get_parent_id(value_id);
+        self.values.get_mut(parent_id).unwrap().as_bb_mut().unwrap()
     }
 
     pub fn mark_using(&mut self, user: ValueId, used: ValueId) {
@@ -392,7 +414,7 @@ impl Module {
     pub fn spawn_load_inst(&mut self, src: ValueId) -> ValueId {
         let load_inst = LoadInst {
             ty: self.values.get(src).unwrap().ty(),
-            src,
+            ptr: src,
         };
         let val_id = self.alloc_value(load_inst.into());
 
@@ -877,6 +899,83 @@ impl InstValue {
         }
     }
 
+    pub fn is_infix_op(&self) -> bool {
+        match self {
+            InstValue::InfixOp(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_load(&self) -> bool {
+        match self {
+            InstValue::Load(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_store(&self) -> bool {
+        match self {
+            InstValue::Store(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_alloca(&self) -> bool {
+        match self {
+            InstValue::Alloca(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_branch(&self) -> bool {
+        match self {
+            InstValue::Branch(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_jump(&self) -> bool {
+        match self {
+            InstValue::Jump(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_gep(&self) -> bool {
+        match self {
+            InstValue::Gep(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_return(&self) -> bool {
+        match self {
+            InstValue::Return(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_call(&self) -> bool {
+        match self {
+            InstValue::Call(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_phi(&self) -> bool {
+        match self {
+            InstValue::Phi(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_cast(&self) -> bool {
+        match self {
+            InstValue::Cast(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn has_output(&self) -> bool {
         match self {
             InstValue::InfixOp(_) => true,
@@ -1111,7 +1210,7 @@ impl_replace_operands!(CastInst, value);
 #[derive(Debug, Clone)]
 pub struct LoadInst {
     pub ty: Type,
-    pub src: ValueId,
+    pub ptr: ValueId,
 }
 
 impl Into<Value> for LoadInst {
@@ -1120,7 +1219,7 @@ impl Into<Value> for LoadInst {
     }
 }
 
-impl_replace_operands!(LoadInst, src);
+impl_replace_operands!(LoadInst, ptr);
 
 /// store <ty> <value>, <ty>* <pointer>
 #[derive(Debug, Clone)]

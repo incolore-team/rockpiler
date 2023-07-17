@@ -325,8 +325,18 @@ impl Builder {
             self.module.set_insert_point(next_bb);
             self.visit_cond_expr(&infix_expr.rhs, true_bb, false_bb);
         } else {
-            let cond_value = self.build_expr(&cond_expr, false);
-            self.module.spawn_br_inst(cond_value, true_bb, false_bb);
+            let cond_val_id = self.build_expr(&cond_expr, false);
+            println!("cond_val_id: {}", self.module.inspect_value(cond_val_id));
+            // 如果不是 bool(i1) 类型，则生成一个比较指令
+            let ty = self.module.get_value(cond_val_id).ty();
+            let cond_val_id = if ty != BuiltinType::Bool.into() {
+                let zero_val_id = self.module.spawn_zero_value(ty.clone());
+                self.module
+                    .spawn_binop_inst(ty, InfixOp::Ne, cond_val_id, zero_val_id)
+            } else {
+                cond_val_id
+            };
+            self.module.spawn_br_inst(cond_val_id, true_bb, false_bb);
         }
     }
 

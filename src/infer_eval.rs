@@ -66,11 +66,6 @@ impl InferEvaluator for InfixExpr {
         let lhs_type = self.lhs.infer_type(syms)?;
         let rhs_type = self.rhs.infer_type(syms)?;
 
-        // 如果左右类型一致，则返回该类型
-        if lhs_type == rhs_type {
-            return Some(lhs_type);
-        }
-
         // 对于不同类型的运算，C 语言规定需要进行类型转换
         match self.op {
             InfixOp::Add | InfixOp::Sub | InfixOp::Mul | InfixOp::Div | InfixOp::Mod => {
@@ -106,6 +101,11 @@ impl InferEvaluator for InfixExpr {
                 }
             }
         }
+
+        // // 如果左右类型一致，则返回该类型
+        // if lhs_type == rhs_type {
+        //     return Some(lhs_type);
+        // }
 
         // 无法进行类型推断
         None

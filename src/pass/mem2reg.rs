@@ -79,11 +79,11 @@ impl Mem2Reg<'_> {
                 let inst = self.module.get_inst(inst_id);
                 if let InstValue::Load(load_inst) = inst {
                     // if load src ptr is not promotable, keep it
-                    if !promotables.contains(&load_inst.src) {
+                    if !promotables.contains(&load_inst.ptr) {
                         return true;
                     }
                     // var ptr = (AllocaInst)load.getPtr();
-                    let var = self.read_var(bb_id, load_inst.src);
+                    let var = self.read_var(bb_id, load_inst.ptr);
                     // // inst的use就不用移除了，因为另外一边是alloca，之后也会被移除。
                     self.module.replace_value(inst_id, var);
                     false
@@ -116,8 +116,7 @@ impl Mem2Reg<'_> {
 
         // 把所有phi指令加入基本块
         for phi in self.pending_phis.clone() {
-            let bb_id = self.module.value_parent[&phi];
-            let bb = self.module.get_bb_mut(bb_id);
+            let bb = self.module.get_parent_mut(phi.clone());
             bb.insts.insert(0, phi);
         }
 
@@ -255,7 +254,7 @@ impl Mem2Reg<'_> {
             }
         }
 
-        if same_val.is_none() {
+        if same_val.is_none() { // 所有operand都是phi自己
             // assert self.module.value_user[phi_id].is_empty()
             undef = true;
             same_val = Some(self.get_undef_value(self.module.get_inst(phi_id).ty()));
