@@ -173,6 +173,8 @@ impl Mem2Reg<'_> {
         let alloca = self.module.get_inst(alloca_id);
         let ty = alloca.ty();
         let phi = self.module.alloc_phi_inst(ty); // todo: set parent for it
+        self.pending_phis.insert(phi.clone());
+        self.module.value_parent.insert(phi.clone(), bb_id);
         phi
     }
 

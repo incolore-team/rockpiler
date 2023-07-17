@@ -104,7 +104,7 @@ impl<'a> Printer<'a> {
             InstValue::Jump(inst) => self.print_jump_inst(val_id, inst),
             InstValue::Return(inst) => self.print_ret_inst(val_id, inst),
             InstValue::Call(inst) => self.print_call_inst(val_id, inst),
-            InstValue::Phi(_) => todo!(),
+            InstValue::Phi(_) => self.print_phi_inst(val_id, inst_val),
             InstValue::Cast(_) => todo!(),
         }
     }
@@ -165,6 +165,31 @@ impl<'a> Printer<'a> {
             print!("{}", self.format_value(arg, arg_val));
         }
         println!(")");
+    }
+
+    pub fn print_phi_inst(&mut self, val_id: &ValueId, inst_val: &InstValue) {
+        let inst = match inst_val {
+            InstValue::Phi(inst) => inst,
+            _ => panic!("[{}] is not a phi inst", val_id.index()),
+        };
+        print!(
+            "{} = phi {}",
+            self.resolve_name(&val_id),
+            self.format_type(&inst.ty)
+        );
+        for (i, (bb, val)) in inst.incomings.iter().enumerate() {
+            let bb_val = Value::resolve(*bb, self.module);
+            let val_val = Value::resolve(*val, self.module);
+            if i != 0 {
+                print!(", ");
+            }
+            print!(
+                "[{}, %{}]",
+                self.format_value(bb, bb_val),
+                self.format_value(val, val_val)
+            );
+        }
+        println!();
     }
 
     pub fn print_store_inst(&mut self, inst: &StoreInst) {
@@ -255,7 +280,7 @@ impl<'a> Printer<'a> {
         match val {
             Value::GlobalVariable(_) => self.resolve_name(val_id),
             Value::Function(_) => todo!(),
-            Value::BasicBlock(_) => todo!(),
+            Value::BasicBlock(_) => self.resolve_name(val_id),
             // Value::Instruction(inst) => self.format_inst(val_id, inst),
             Value::Instruction(inst) => self.resolve_name(val_id),
             Value::Const(c) => self.format_const(c),
@@ -320,8 +345,9 @@ impl<'a> Printer<'a> {
             return name.clone();
         }
         panic!(
-            "no name for value: {}",
-            self.module.inspect_value(val_id.clone())
+            "no name for value: {}. users: {}",
+            self.module.inspect_value(val_id.clone()),
+            self.module.inspect_value_users(val_id.clone())
         );
     }
 

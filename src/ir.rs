@@ -216,6 +216,20 @@ impl Module {
         }
     }
 
+    pub fn inspect_value_users(&self, value_id: ValueId) -> String {
+        let users = self.value_user.get(&value_id);
+        if users.is_none() {
+            return format!("value [{}] is not used", value_id.index());
+        }
+        let users = users.unwrap();
+        let mut s = String::new();
+        for user in users {
+            s.push_str(&self.inspect_value(*user));
+            s.push_str("\n");
+        }
+        s
+    }
+
     /// 对一个 Value 做不再使用处理
     ///
     /// 将移除所有对它的使用记录
@@ -300,14 +314,32 @@ impl Module {
             }
         }
 
-        self.values.iter_mut().for_each(|(val_id, val)| match val {
+        // 将所有 value 对 value_id 的使用替换为 new_value_id
+        self.values.iter_mut().for_each(|(_val_id, val)| match val {
             Value::Instruction(inst) => {
                 inst.replace_operands(value_id, new_value_id);
             }
             _ => {}
         });
 
+        // // 将原来的 value_id 占用的指令位置，替换为 new_value_id
+        // let parent_bb_id = self.get_parent(value_id);
+        // let parent_bb = self.values.get_mut(parent_bb_id).unwrap().as_bb_mut();
+        // parent_bb.unwrap().insts.iter_mut().for_each(|inst| {
+        //     if inst.clone() == value_id {
+        //         *inst = new_value_id;
+        //     }
+        // });
+
         self.value_using.remove(&value_id);
+    }
+
+    pub fn get_parent(&self, value_id: ValueId) -> ValueId {
+        let tmp = self.value_parent.get(&value_id);
+        if tmp.is_none() {
+            panic!("value has no parent: {}", self.inspect_value(value_id));
+        }
+        tmp.unwrap().clone()
     }
 
     pub fn mark_using(&mut self, user: ValueId, used: ValueId) {
@@ -367,6 +399,7 @@ impl Module {
         self.mark_using(val_id, src);
 
         self.cur_bb_mut().insts.push(val_id);
+        self.mark_parent(val_id, self.cur_bb.unwrap());
         val_id
     }
 
@@ -394,6 +427,8 @@ impl Module {
         self.mark_using(val_id, func);
 
         self.cur_bb_mut().insts.push(val_id);
+        self.mark_parent(val_id, self.cur_bb.unwrap());
+
         val_id
     }
 
@@ -582,6 +617,20 @@ impl Value {
     pub fn as_global_variable(&self) -> Option<&GlobalVariableValue> {
         match self {
             Value::GlobalVariable(gv) => Some(gv),
+            _ => None,
+        }
+    }
+
+    pub fn as_bb(&self) -> Option<&BasicBlockValue> {
+        match self {
+            Value::BasicBlock(bb) => Some(bb),
+            _ => None,
+        }
+    }
+
+    pub fn as_bb_mut(&mut self) -> Option<&mut BasicBlockValue> {
+        match self {
+            Value::BasicBlock(bb) => Some(bb),
             _ => None,
         }
     }
