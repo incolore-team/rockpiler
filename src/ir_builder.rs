@@ -124,6 +124,7 @@ impl Builder {
         self.module.alloc_value(value)
     }
 
+    // TODO: 对alloca后的数组memset
     pub fn build_array_init_val(
         &mut self,
         ptr: ValueId,
@@ -144,10 +145,13 @@ impl Builder {
                         // let iv_ = array_init_val.0.get(i);
                         let iv_ = deque.front().cloned();
                         if let Some(iv) = iv_ {
-                            let ty = Type::Array(ArrayType::Constant(const_at.clone())).into();
-                            let gep_id =
-                                self.module
-                                    .spawn_gep_inst(ty, ptr, vec![i32_zero_id, i32_i_id]);
+                            let ty = Type::Array(ArrayType::Constant(type_.clone())).into();
+                            let gep_id = self.module.spawn_gep_inst(
+                                ty,
+                                elem_type.clone(),
+                                ptr,
+                                vec![i32_zero_id, i32_i_id],
+                            );
                             match iv {
                                 InitVal::Array(array_iv) => {
                                     // let mut queue = VecDeque::from(array_iv.0.clone());
@@ -171,9 +175,12 @@ impl Builder {
                     if let Some(iv) = iv_ {
                         let init_val = self.build_init_val(&iv, elem_type);
                         let ty = Type::Array(ArrayType::Constant(type_.clone())).into();
-                        let gep_id =
-                            self.module
-                                .spawn_gep_inst(ty, ptr, vec![i32_zero_id, i32_i_id]);
+                        let gep_id = self.module.spawn_gep_inst(
+                            ty,
+                            elem_type.clone(),
+                            ptr,
+                            vec![i32_zero_id, i32_i_id],
+                        );
                         self.module.spawn_store_inst(gep_id, init_val);
                     }
                 }
@@ -510,20 +517,40 @@ impl Builder {
                     .spawn_binop_inst(ty, converted_infix_op, zero_id, rhs)
             }
             Expr::Postfix(postfix_expr) => {
-                let _lhs = self.build_expr(&postfix_expr.lhs, false);
-                let _op = match postfix_expr.op {
-                    PostfixOp::Incr => InfixOp::Add,
-                    PostfixOp::Decr => InfixOp::Sub,
+                let _op: Option<_> = match postfix_expr.op {
+                    PostfixOp::Incr => Some(InfixOp::Add),
+                    PostfixOp::Decr => Some(InfixOp::Sub),
                     PostfixOp::CallAccess(_) => {
                         todo!()
                     }
                     PostfixOp::DotAccess(_) => {
                         todo!()
                     }
-                    PostfixOp::IndexAccess(_) => {
-                        todo!()
-                    }
+                    PostfixOp::IndexAccess(_) => None,
                 };
+                if let PostfixOp::IndexAccess(ia) = &postfix_expr.op {
+                    let _lhs = self.build_expr(&postfix_expr.lhs, true);
+                    let index = self.build_expr(&ia.index, false);
+                    let i32_zero_id = self.build_i32_val(0);
+                    let lhs = self.get_value(_lhs);
+                    // trace!("lhs: {:?}", lhs);
+                    let ty_ = match lhs {
+                        Value::Instruction(iv) => iv.ty(),
+                        _ => unreachable!(),
+                    };
+                    let infer_ty = &postfix_expr.infer_ty;
+                    let gep_inst_id = self.module.spawn_gep_inst(
+                        ty_,
+                        infer_ty.clone().unwrap(),
+                        _lhs,
+                        vec![i32_zero_id, index],
+                    );
+                    if let Some(Type::Builtin(_)) = infer_ty {
+                        let load_inst_id = self.module.spawn_load_inst(gep_inst_id);
+                        return load_inst_id;
+                    }
+                    return gep_inst_id;
+                }
                 todo!()
             }
             Expr::Primary(primary_expr) => match primary_expr {

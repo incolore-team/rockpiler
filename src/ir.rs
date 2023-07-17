@@ -438,6 +438,7 @@ impl Module {
             let inst = self.get_inst(ptr);
             match inst {
                 InstValue::Alloca(_) => {}
+                InstValue::Gep(_) => {}
                 _ => panic!("ptr is not a pointer"),
             }
         }
@@ -452,9 +453,16 @@ impl Module {
         store_id
     }
 
-    pub fn spawn_gep_inst(&mut self, ty: Type, pointer: ValueId, indices: Vec<ValueId>) -> ValueId {
+    pub fn spawn_gep_inst(
+        &mut self,
+        ty: Type,
+        base: Type,
+        pointer: ValueId,
+        indices: Vec<ValueId>,
+    ) -> ValueId {
         let gep = GetElementPtrInst {
             ty,
+            base,
             pointer,
             indices: indices.clone(),
         };
@@ -784,7 +792,7 @@ impl InstValue {
             InstValue::Alloca(inst) => inst.ty.clone(),
             InstValue::Branch(_) => BuiltinType::Void.into(),
             InstValue::Jump(_) => BuiltinType::Void.into(),
-            InstValue::Gep(inst) => inst.ty.clone(),
+            InstValue::Gep(inst) => inst.base.clone(),
             InstValue::Return(_) => BuiltinType::Void.into(),
             InstValue::Call(inst) => inst.ty.clone(),
             InstValue::Phi(inst) => inst.ty.clone(),
@@ -1135,6 +1143,7 @@ impl_replace_operands!(StoreInst, value, ptr);
 #[derive(Debug, Clone)]
 pub struct GetElementPtrInst {
     pub ty: Type,
+    pub base: Type,
     pub pointer: ValueId,
     pub indices: Vec<ValueId>,
 }
