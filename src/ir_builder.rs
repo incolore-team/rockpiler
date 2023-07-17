@@ -164,6 +164,7 @@ impl Builder {
         self.alloc_value(value)
     }
 
+    // TODO: 对alloca后的数组memset
     pub fn build_array_init_val(
         &mut self,
         ptr: ValueId,
@@ -186,6 +187,7 @@ impl Builder {
                         if let Some(iv) = iv_ {
                             let gep_inst = GetElementPtrInst {
                                 ty: Type::Array(ArrayType::Constant(type_.clone())).into(),
+                                base: elem_type.clone(),
                                 pointer: ptr,
                                 indices: vec![i32_zero_id, i32_i_id],
                             };
@@ -216,6 +218,7 @@ impl Builder {
 
                         let gep_inst = GetElementPtrInst {
                             ty: Type::Array(ArrayType::Constant(type_.clone())).into(),
+                            base: elem_type.clone(),
                             pointer: ptr,
                             indices: vec![i32_zero_id, i32_i_id],
                         };
@@ -660,20 +663,47 @@ impl Builder {
                 val_id // returns the binary operator value id
             }
             Expr::Postfix(postfix_expr) => {
-                let _lhs = self.build_expr(&postfix_expr.lhs, false);
-                let _op = match postfix_expr.op {
-                    PostfixOp::Incr => InfixOp::Add,
-                    PostfixOp::Decr => InfixOp::Sub,
+                let _op: Option<_> = match postfix_expr.op {
+                    PostfixOp::Incr => Some(InfixOp::Add),
+                    PostfixOp::Decr => Some(InfixOp::Sub),
                     PostfixOp::CallAccess(_) => {
                         todo!()
                     }
                     PostfixOp::DotAccess(_) => {
                         todo!()
                     }
-                    PostfixOp::IndexAccess(_) => {
-                        todo!()
-                    }
+                    PostfixOp::IndexAccess(_) => None,
                 };
+                if let PostfixOp::IndexAccess(ia) = &postfix_expr.op {
+                    let _lhs = self.build_expr(&postfix_expr.lhs, true);
+                    let index = self.build_expr(&ia.index, false);
+                    let i32_zero_id = self.build_i32_val(0);
+                    let lhs = self.get_value(_lhs);
+                    // trace!("lhs: {:?}", lhs);
+                    let ty_ = match lhs {
+                        Value::Instruction(iv) => iv.ty(),
+                        _ => unreachable!(),
+                    };
+                    let infer_ty = &postfix_expr.infer_ty;
+                    let gep_inst = GetElementPtrInst {
+                        ty: ty_,
+                        base: infer_ty.clone().unwrap(),
+                        pointer: _lhs,
+                        indices: vec![i32_zero_id, index],
+                    };
+                    let gep_inst_id = self.alloc_value(gep_inst.into());
+                    self.cur_bb_mut().insts.push_back(gep_inst_id);
+                    if let Some(Type::Builtin(_)) = infer_ty {
+                        let load_inst = LoadInst {
+                            ty: infer_ty.clone().unwrap(),
+                            src: gep_inst_id,
+                        };
+                        let load_inst_id = self.alloc_value(load_inst.into());
+                        self.cur_bb_mut().insts.push_back(load_inst_id);
+                        return load_inst_id;
+                    }
+                    return gep_inst_id;
+                }
                 todo!()
             }
             Expr::Primary(primary_expr) => match primary_expr {

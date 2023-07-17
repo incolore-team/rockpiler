@@ -266,7 +266,7 @@ impl InstValue {
             InstValue::Alloca(inst) => inst.ty.clone(),
             InstValue::Branch(_) => BuiltinType::Void.into(),
             InstValue::Jump(_) => BuiltinType::Void.into(),
-            InstValue::Gep(inst) => inst.ty.clone(),
+            InstValue::Gep(inst) => inst.base.clone(),
             InstValue::Return(_) => BuiltinType::Void.into(),
             InstValue::Call(inst) => inst.ty.clone(),
             InstValue::Phi(inst) => inst.ty.clone(),
@@ -485,6 +485,7 @@ impl Into<Value> for StoreInst {
 #[derive(Debug, Clone)]
 pub struct GetElementPtrInst {
     pub ty: Type,
+    pub base: Type,
     pub pointer: ValueId,
     pub indices: Vec<ValueId>,
 }

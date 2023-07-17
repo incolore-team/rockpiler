@@ -1,4 +1,5 @@
 use crate::{ast::*, infer_eval::InferEvaluator, scope::*, symbol::*};
+use log::trace;
 #[derive(Debug, PartialEq, Clone)]
 pub struct SemaRef {
     pub symbol_id: SymbolId,
@@ -76,8 +77,13 @@ fn eval_array_type(at: &mut ArrayType, symbol_table: &mut SymbolTable) {
 
 impl ToSemaTrait for VarDecl {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
+        if let Some(iv) = &mut self.init {
+            iv.to_sema(symbol_table);
+        }
         match &mut self.type_ {
-            Type::Array(at) => eval_array_type(at, symbol_table),
+            Type::Array(at) => {
+                eval_array_type(at, symbol_table);
+            }
             _ => (),
         };
         let symbol = Symbol::Var(VarSymbol::new(self.clone()));
@@ -195,6 +201,7 @@ impl ToSemaTrait for CallExpr {
 
 impl ToSemaTrait for IdentExpr {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
+        trace!("IdentExpr to_sema: {:?}", self);
         let symbol = symbol_table.lookup_symbol(&mut self.id);
         if symbol.is_none() {
             panic!("Undefined identifier: {}", self.id);
@@ -261,5 +268,22 @@ impl ToSemaTrait for DoWhileStmt {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.stmt.to_sema(symbol_table);
         self.cond.to_sema(symbol_table);
+    }
+}
+
+impl ToSemaTrait for InitVal {
+    fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
+        match self {
+            InitVal::Expr(expr) => expr.to_sema(symbol_table),
+            InitVal::Array(array_iv) => array_iv.to_sema(symbol_table),
+        }
+    }
+}
+
+impl ToSemaTrait for ArrayInitVal {
+    fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
+        for iv in &mut self.0 {
+            iv.to_sema(symbol_table);
+        }
     }
 }
