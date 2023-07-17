@@ -319,7 +319,10 @@ impl<'a> Printer<'a> {
         if let Some(name) = name {
             return name.clone();
         }
-        panic!("no name for value: {:?}", val_id)
+        panic!(
+            "no name for value: {}",
+            self.module.inspect_value(val_id.clone())
+        );
     }
 
     pub fn format_binary_op(&mut self, val_id: &ValueId, bo: &BinaryOperator) -> String {

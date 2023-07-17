@@ -1,10 +1,6 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, fmt::Binary};
 
 use crate::{ast::*, ir::*, scope::*};
-use log::trace;
-use std::{clone, collections::HashMap};
-
-use crate::{ast::*, ir::*, scope::*, util::Insertable};
 
 pub fn build(ast: &mut TransUnit, syms: SymbolTable) -> Module {
     let mut builder = Builder::new(syms);
@@ -14,11 +10,6 @@ pub fn build(ast: &mut TransUnit, syms: SymbolTable) -> Module {
 
 struct Builder {
     module: Module,
-
-    // 只是为了函数少两个参数
-    cur_func: Option<ValueId>,
-    cur_bb: Option<ValueId>,
-
     loop_stack: Vec<(ValueId, ValueId)>, // (break target bb, continue target bb)
 }
 
@@ -26,41 +17,8 @@ impl Builder {
     pub fn new(syms: SymbolTable) -> Self {
         Self {
             module: Module::new(syms),
-
-            cur_func: None,
-            cur_bb: None,
-
             loop_stack: Vec::new(),
         }
-    }
-
-    pub fn alloc_value(&mut self, val: Value) -> ValueId {
-        let val_id = self.module.values.alloc(val);
-        let idx = val_id.index();
-        if idx > 131072 {
-            panic!("too many values");
-        }
-        val_id
-    }
-
-    pub fn cur_bb_mut(&mut self) -> &mut BasicBlockValue {
-        self.module.get_bb_mut(self.cur_bb.unwrap())
-    }
-
-    pub fn cur_func_mut(&mut self) -> &mut FunctionValue {
-        self.module.get_func_mut(self.cur_func.unwrap())
-    }
-
-    pub fn cur_bb(&self) -> &BasicBlockValue {
-        self.module.get_bb(self.cur_bb.unwrap())
-    }
-
-    pub fn cur_func(&self) -> &FunctionValue {
-        self.module.get_func(self.cur_func.unwrap())
-    }
-
-    pub fn set_insert_point(&mut self, bb: ValueId) {
-        self.cur_bb = Some(bb);
     }
 
     pub fn build_module(&mut self, ast: &mut TransUnit) {
@@ -98,31 +56,33 @@ impl Builder {
         if !is_external {
             let entry_bb = BasicBlockValue::new("entry".to_string());
 
-            let entry_bb_id = self.alloc_value(Value::BasicBlock(entry_bb));
+            let entry_bb_id = self.module.alloc_value(Value::BasicBlock(entry_bb));
             cur_func
                 .bbs
                 .append_with_name(entry_bb_id, "entry".to_string());
 
-            self.cur_bb = Some(entry_bb_id);
+            self.module.set_insert_point(entry_bb_id);
         }
 
-        let function_id = self.alloc_value(Value::Function(cur_func));
+        let function_id = self.module.alloc_value(Value::Function(cur_func));
         self.module
             .functions
             .insert(func_decl.name.clone(), function_id);
 
-        self.cur_func = Some(function_id);
+        self.module.set_cur_func(function_id);
         if !is_external {
             let mut index = 0;
             for param in &func_decl.params {
-                let alloca_id = self.spawn_alloca_inst(param.name.clone(), param.type_.clone());
+                let alloca_id = self
+                    .module
+                    .spawn_alloca_inst(param.name.clone(), param.type_.clone());
                 self.module
                     .sym2def
                     .insert(param.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
 
                 // store param to allocated mem
-                let param_value = self.cur_func().params[index];
-                self.spawn_store_inst(alloca_id, param_value);
+                let param_value = self.module.cur_func().params[index];
+                self.module.spawn_store_inst(alloca_id, param_value);
                 index += 1;
             }
             if let Some(body) = &func_decl.body {
@@ -149,7 +109,7 @@ impl Builder {
             initializer,
         };
 
-        let global_var_id = self.alloc_value(Value::GlobalVariable(global_var));
+        let global_var_id = self.module.alloc_value(Value::GlobalVariable(global_var));
         self.module.global_variables.insert(name, global_var_id);
         self.module
             .sym2def
@@ -161,7 +121,7 @@ impl Builder {
             ty: Type::Builtin(BuiltinType::Int),
             value: val as i64,
         }));
-        self.alloc_value(value)
+        self.module.alloc_value(value)
     }
 
     // TODO: 对alloca后的数组memset
@@ -185,14 +145,13 @@ impl Builder {
                         // let iv_ = array_init_val.0.get(i);
                         let iv_ = deque.front().cloned();
                         if let Some(iv) = iv_ {
-                            let gep_inst = GetElementPtrInst {
-                                ty: Type::Array(ArrayType::Constant(type_.clone())).into(),
-                                base: elem_type.clone(),
-                                pointer: ptr,
-                                indices: vec![i32_zero_id, i32_i_id],
-                            };
-                            let gep_id = self.alloc_value(gep_inst.into());
-                            self.cur_bb_mut().insts.push_back(gep_id);
+                            let ty = Type::Array(ArrayType::Constant(type_.clone())).into();
+                            let gep_id = self.module.spawn_gep_inst(
+                                ty,
+                                elem_type.clone(),
+                                ptr,
+                                vec![i32_zero_id, i32_i_id],
+                            );
                             match iv {
                                 InitVal::Array(array_iv) => {
                                     // let mut queue = VecDeque::from(array_iv.0.clone());
@@ -215,22 +174,14 @@ impl Builder {
                     let iv_ = deque.pop_front();
                     if let Some(iv) = iv_ {
                         let init_val = self.build_init_val(&iv, elem_type);
-
-                        let gep_inst = GetElementPtrInst {
-                            ty: Type::Array(ArrayType::Constant(type_.clone())).into(),
-                            base: elem_type.clone(),
-                            pointer: ptr,
-                            indices: vec![i32_zero_id, i32_i_id],
-                        };
-                        let gep_id = self.alloc_value(gep_inst.into());
-                        self.cur_bb_mut().insts.push_back(gep_id);
-
-                        let store_inst = StoreInst {
-                            value: init_val,
-                            ptr: gep_id,
-                        };
-                        let store_id = self.alloc_value(store_inst.into());
-                        self.cur_bb_mut().insts.push_back(store_id);
+                        let ty = Type::Array(ArrayType::Constant(type_.clone())).into();
+                        let gep_id = self.module.spawn_gep_inst(
+                            ty,
+                            elem_type.clone(),
+                            ptr,
+                            vec![i32_zero_id, i32_i_id],
+                        );
+                        self.module.spawn_store_inst(gep_id, init_val);
                     }
                 }
             }
@@ -250,7 +201,7 @@ impl Builder {
                 //     .collect();
 
                 // let const_array = ConstArray { ty, values };
-                // let const_id = self.alloc_value(Value::Const(ConstValue::Array(const_array)));
+                //.module let const_id = self.module.alloc_value(Value::Const(ConstValue::Array(const_array)));
                 // const_id
             }
         }
@@ -291,7 +242,7 @@ impl Builder {
         }
 
         let (break_bb, _) = self.loop_stack.last().unwrap().clone();
-        self.spawn_jump_inst(break_bb);
+        self.module.spawn_jump_inst(break_bb);
     }
 
     pub fn build_continue_statement(&mut self) {
@@ -300,7 +251,7 @@ impl Builder {
         }
 
         let (_, cont_bb) = self.loop_stack.last().unwrap().clone();
-        self.spawn_jump_inst(cont_bb);
+        self.module.spawn_jump_inst(cont_bb);
     }
 
     pub fn build_block_statement(&mut self, block_stmt: &Block) {
@@ -311,7 +262,9 @@ impl Builder {
 
     pub fn build_var_decls_statement(&mut self, var_decls_stmt: &VarDecls) {
         for decl in &var_decls_stmt.decls {
-            let alloca_id = self.spawn_alloca_inst(decl.name.clone(), decl.type_.clone());
+            let alloca_id = self
+                .module
+                .spawn_alloca_inst(decl.name.clone(), decl.type_.clone());
             let decl_ty = decl.type_.clone();
             match &decl.init {
                 Some(init_val) => {
@@ -327,12 +280,7 @@ impl Builder {
                         }
                         _ => {
                             let init_val_id = self.build_init_val(init_val, &decl.type_);
-                            let store_inst = StoreInst {
-                                value: init_val_id,
-                                ptr: alloca_id,
-                            };
-                            let store_id = self.alloc_value(store_inst.into());
-                            self.cur_bb_mut().insts.push_back(store_id);
+                            self.module.spawn_store_inst(alloca_id, init_val_id);
                         }
                     }
                     self.module
@@ -346,33 +294,6 @@ impl Builder {
                 }
             }
         }
-    }
-
-    pub fn spawn_alloca_inst(&mut self, name: String, ty: Type) -> ValueId {
-        let alloca = AllocaInst { name, ty };
-        let alloca_id = self.alloc_value(alloca.into());
-        let entry_bb_id = self.cur_func().bbs.entry_bb();
-
-        // 用于确定插入位置的临时变量
-        let ins_pos;
-
-        // 使用一个新的作用域来查找插入位置
-        {
-            let entry_bb = self.module.get_bb(entry_bb_id.clone());
-            ins_pos = entry_bb
-                .insts
-                .iter()
-                .position(|inst_id| {
-                    !matches!(self.module.get_inst(inst_id.clone()), InstValue::Alloca(_))
-                })
-                .unwrap_or_else(|| entry_bb.insts.len());
-        }
-
-        // 在找到的位置插入新的alloca指令
-        let entry_bb_mut = self.module.get_bb_mut(entry_bb_id.clone());
-        entry_bb_mut.insts.insert(ins_pos, alloca_id);
-
-        alloca_id
     }
 
     pub fn visit_cond_expr(&mut self, cond_expr: &Box<Expr>, true_bb: ValueId, false_bb: ValueId) {
@@ -392,45 +313,45 @@ impl Builder {
             };
 
             if infix_expr.op == InfixOp::LogicAnd {
-                next_bb = self.spawn_basic_block();
+                next_bb = self.module.spawn_basic_block();
                 self.visit_cond_expr(&infix_expr.lhs, next_bb.clone(), false_bb);
             } else if infix_expr.op == InfixOp::LogicOr {
-                next_bb = self.spawn_basic_block();
+                next_bb = self.module.spawn_basic_block();
                 self.visit_cond_expr(&infix_expr.lhs, true_bb, next_bb.clone());
             } else {
                 unreachable!();
             }
 
-            self.cur_bb = Some(next_bb);
+            self.module.set_insert_point(next_bb);
             self.visit_cond_expr(&infix_expr.rhs, true_bb, false_bb);
         } else {
             let cond_value = self.build_expr(&cond_expr, false);
-            self.spawn_br_inst(cond_value, true_bb, false_bb);
+            self.module.spawn_br_inst(cond_value, true_bb, false_bb);
         }
     }
 
     pub fn build_if_statement(&mut self, if_stmt: &IfElseStmt) {
-        let true_bb = self.spawn_basic_block();
-        let exit_bb = self.alloc_basic_block();
+        let true_bb = self.module.spawn_basic_block();
+        let exit_bb = self.module.alloc_basic_block();
         let false_bb = if if_stmt.else_stmt.is_some() {
-            self.spawn_basic_block()
+            self.module.spawn_basic_block()
         } else {
             exit_bb.clone()
         };
 
         self.visit_cond_expr(&if_stmt.cond, true_bb.clone(), false_bb.clone());
 
-        self.cur_bb = Some(true_bb);
+        self.module.set_insert_point(true_bb);
         self.build_statement(&if_stmt.then_stmt);
-        self.spawn_jump_inst(exit_bb.clone());
+        self.module.spawn_jump_inst(exit_bb.clone());
 
         if let Some(else_stmt) = &if_stmt.else_stmt {
-            self.cur_bb = Some(false_bb);
+            self.module.set_insert_point(false_bb);
             self.build_statement(else_stmt);
-            self.spawn_jump_inst(exit_bb.clone());
+            self.module.spawn_jump_inst(exit_bb.clone());
         }
-        self.cur_func_mut().bbs.append(exit_bb.clone());
-        self.cur_bb = Some(exit_bb);
+        self.module.cur_func_mut().bbs.append(exit_bb.clone());
+        self.module.set_insert_point(exit_bb);
     }
     /*
     int main() {
@@ -464,68 +385,29 @@ impl Builder {
     }
      */
     pub fn build_while_statement(&mut self, while_stmt: &WhileStmt) {
-        let cond_bb = self.spawn_basic_block();
-        let body_bb = self.spawn_basic_block();
-        let end_bb = self.alloc_basic_block();
+        let cond_bb = self.module.spawn_basic_block();
+        let body_bb = self.module.spawn_basic_block();
+        let end_bb = self.module.alloc_basic_block();
 
         self.loop_stack.push((end_bb, cond_bb));
         {
-            self.set_insert_point(cond_bb);
+            self.module.set_insert_point(cond_bb);
             let cond_value = self.build_expr(&while_stmt.cond, false);
-            self.spawn_br_inst(cond_value, body_bb, end_bb);
+            self.module.spawn_br_inst(cond_value, body_bb, end_bb);
 
-            self.set_insert_point(body_bb);
+            self.module.set_insert_point(body_bb);
             self.build_statement(&while_stmt.body);
-            self.spawn_jump_inst(cond_bb);
+            self.module.spawn_jump_inst(cond_bb);
 
-            self.cur_func_mut().bbs.append(end_bb.clone());
+            self.module.cur_func_mut().bbs.append(end_bb.clone());
 
-            self.set_insert_point(end_bb);
+            self.module.set_insert_point(end_bb);
         }
         self.loop_stack.pop();
     }
 
     pub fn get_value(&self, value_id: ValueId) -> &Value {
         &self.module.values[value_id]
-    }
-
-    pub fn alloc_br_inst(&mut self, cond: ValueId, then_bb: ValueId, else_bb: ValueId) -> ValueId {
-        let br = BranchInst {
-            cond,
-            then_bb,
-            else_bb,
-        };
-        let br_id = self.alloc_value(br.into());
-        br_id
-    }
-
-    pub fn alloc_jump_inst(&mut self, bb: ValueId) -> ValueId {
-        let jump = JumpInst { bb };
-        let jump_id = self.alloc_value(jump.into());
-        jump_id
-    }
-
-    pub fn spawn_jump_inst(&mut self, bb: ValueId) -> ValueId {
-        let jump_id = self.alloc_jump_inst(bb);
-        self.cur_bb_mut().insts.push_back(jump_id);
-        jump_id
-    }
-
-    pub fn spawn_br_inst(&mut self, cond: ValueId, true_bb: ValueId, false_bb: ValueId) -> ValueId {
-        let br_id = self.alloc_br_inst(cond, true_bb, false_bb);
-        self.cur_bb_mut().insts.push_back(br_id);
-        br_id
-    }
-
-    pub fn alloc_basic_block(&mut self) -> ValueId {
-        let bb = BasicBlockValue::default();
-        let bb_id = self.alloc_value(Value::BasicBlock(bb));
-        bb_id
-    }
-    pub fn spawn_basic_block(&mut self) -> ValueId {
-        let bb_id = self.alloc_basic_block();
-        self.cur_func_mut().bbs.append(bb_id);
-        bb_id
     }
 
     /*
@@ -562,22 +444,22 @@ impl Builder {
             .as_ref()
             .map(|init| self.build_expr(init, false));
 
-        let cond_bb = self.spawn_basic_block();
-        let body_bb = self.spawn_basic_block();
-        let end_bb = self.spawn_basic_block();
+        let cond_bb = self.module.spawn_basic_block();
+        let body_bb = self.module.spawn_basic_block();
+        let end_bb = self.module.spawn_basic_block();
 
-        self.set_insert_point(cond_bb);
+        self.module.set_insert_point(cond_bb);
         let cond_value = for_stmt
             .cond
             .as_ref()
             .map(|cond| self.build_expr(cond, false));
         if let Some(cond_value) = cond_value {
-            self.spawn_br_inst(cond_value, body_bb, end_bb);
+            self.module.spawn_br_inst(cond_value, body_bb, end_bb);
         } else {
-            self.spawn_jump_inst(body_bb);
+            self.module.spawn_jump_inst(body_bb);
         }
 
-        self.set_insert_point(body_bb);
+        self.module.set_insert_point(body_bb);
         self.build_statement(&for_stmt.body);
 
         let _ = for_stmt
@@ -585,7 +467,7 @@ impl Builder {
             .as_ref()
             .map(|update| self.build_expr(update, false));
 
-        self.spawn_jump_inst(cond_bb);
+        self.module.spawn_jump_inst(cond_bb);
     }
 
     pub fn build_return_statement(&mut self, return_stmt: &ReturnStmt) {
@@ -593,27 +475,13 @@ impl Builder {
             .expr
             .as_ref()
             .map(|expr| self.build_expr(expr, false));
-        self.spawn_return_inst(value);
-    }
-
-    pub fn spawn_return_inst(&mut self, value: Option<ValueId>) -> ValueId {
-        let ret = ReturnInst { value };
-        let ret_id = self.alloc_value(ret.into());
-        self.cur_bb_mut().insts.push_back(ret_id);
-        ret_id
+        self.module.spawn_return_inst(value);
     }
 
     pub fn build_expression_statement(&mut self, expr_stmt: &ExprStmt) {
         if let Some(expr) = &expr_stmt.expr {
             self.build_expr(expr, false);
         }
-    }
-
-    pub fn spawn_store_inst(&mut self, ptr: ValueId, value: ValueId) -> ValueId {
-        let store = StoreInst { ptr, value };
-        let store_id = self.alloc_value(store.into());
-        self.cur_bb_mut().insts.push_back(store_id);
-        store_id
     }
 
     // is_lval 表示是否是左值表达式，如果是，则不需要生成 LoadInst
@@ -626,19 +494,11 @@ impl Builder {
                 let rhs = self.build_expr(&infix_expr.rhs, false);
 
                 if is_assign {
-                    return self.spawn_store_inst(lhs, rhs);
+                    return self.module.spawn_store_inst(lhs, rhs);
                 }
-
-                let bin_op = BinaryOperator {
-                    ty: infix_expr.infer_ty.as_ref().unwrap().clone(),
-                    op: infix_expr.op.clone(),
-                    lhs,
-                    rhs,
-                };
-
-                let val_id = self.alloc_value(bin_op.into());
-                self.cur_bb_mut().insts.push_back(val_id);
-                val_id // returns the binary operator value id
+                let ty = infix_expr.infer_ty.as_ref().unwrap().clone();
+                let op = infix_expr.op.clone();
+                self.module.spawn_binop_inst(ty, op, lhs, rhs)
             }
             Expr::Prefix(prefix_expr) => {
                 let rhs = self.build_expr(&prefix_expr.rhs, false);
@@ -650,17 +510,11 @@ impl Builder {
                     PrefixOp::Pos => InfixOp::Add,
                     PrefixOp::Neg => InfixOp::Sub,
                 };
-                let zero = ConstValue::zero_of(prefix_expr.infer_ty.as_ref().unwrap().clone());
-                let zero_id = self.alloc_value(zero.into());
-                let bin_op = BinaryOperator {
-                    ty: prefix_expr.infer_ty.as_ref().unwrap().clone(),
-                    op: converted_infix_op,
-                    lhs: zero_id,
-                    rhs,
-                };
-                let val_id = self.alloc_value(bin_op.into());
-                self.cur_bb_mut().insts.push_back(val_id);
-                val_id // returns the binary operator value id
+                let ty = prefix_expr.infer_ty.as_ref().unwrap().clone();
+                let zero = ConstValue::zero_of(ty.clone());
+                let zero_id = self.module.alloc_value(zero.into());
+                self.module
+                    .spawn_binop_inst(ty, converted_infix_op, zero_id, rhs)
             }
             Expr::Postfix(postfix_expr) => {
                 let _op: Option<_> = match postfix_expr.op {
@@ -685,21 +539,14 @@ impl Builder {
                         _ => unreachable!(),
                     };
                     let infer_ty = &postfix_expr.infer_ty;
-                    let gep_inst = GetElementPtrInst {
-                        ty: ty_,
-                        base: infer_ty.clone().unwrap(),
-                        pointer: _lhs,
-                        indices: vec![i32_zero_id, index],
-                    };
-                    let gep_inst_id = self.alloc_value(gep_inst.into());
-                    self.cur_bb_mut().insts.push_back(gep_inst_id);
+                    let gep_inst_id = self.module.spawn_gep_inst(
+                        ty_,
+                        infer_ty.clone().unwrap(),
+                        _lhs,
+                        vec![i32_zero_id, index],
+                    );
                     if let Some(Type::Builtin(_)) = infer_ty {
-                        let load_inst = LoadInst {
-                            ty: infer_ty.clone().unwrap(),
-                            src: gep_inst_id,
-                        };
-                        let load_inst_id = self.alloc_value(load_inst.into());
-                        self.cur_bb_mut().insts.push_back(load_inst_id);
+                        let load_inst_id = self.module.spawn_load_inst(gep_inst_id);
                         return load_inst_id;
                     }
                     return gep_inst_id;
@@ -718,15 +565,7 @@ impl Builder {
 
                     let args = args.into_iter().map(|arg| self.build_expr(&arg, false)); // 使用临时 Vec 构建表达式，避免多次借用 self
                     let args = args.collect::<Vec<_>>(); // 将结果收集到一个临时的 Vec 中
-                    let func_value = self.module.values.get(func_id).unwrap();
-                    let call_inst = CallInst {
-                        ty: func_value.ty(),
-                        func: func_id.clone(),
-                        args,
-                    };
-                    let val_id = self.alloc_value(call_inst.into());
-                    self.cur_bb_mut().insts.push_back(val_id);
-                    val_id //
+                    self.module.spawn_call_inst(func_id.clone(), args)
                 }
                 PrimaryExpr::Ident(ident_expr) => {
                     /*
@@ -750,22 +589,12 @@ impl Builder {
                     if is_lval {
                         var_val_id
                     } else {
-                        self.spawn_load_inst(var_val_id)
+                        self.module.spawn_load_inst(var_val_id)
                     }
                 }
                 PrimaryExpr::Literal(literal) => self.build_literal(literal),
             },
         }
-    }
-
-    fn spawn_load_inst(&mut self, src: ValueId) -> ValueId {
-        let load_inst = LoadInst {
-            ty: self.module.values.get(src).unwrap().ty(),
-            src,
-        };
-        let val_id = self.alloc_value(load_inst.into());
-        self.cur_bb_mut().insts.push_back(val_id);
-        val_id
     }
 
     fn build_literal(&mut self, literal: &Literal) -> ValueId {
@@ -775,21 +604,21 @@ impl Builder {
                     ty: BuiltinType::Int.into(),
                     value: *int,
                 };
-                self.alloc_value(int_value.into())
+                self.module.alloc_value(int_value.into())
             }
             Literal::Float(float) => {
                 let float_value = ConstFloat {
                     ty: BuiltinType::Float.into(),
                     value: *float,
                 };
-                self.alloc_value(float_value.into())
+                self.module.alloc_value(float_value.into())
             }
             Literal::Bool(bool) => {
                 let bool_value = ConstInt {
                     ty: BuiltinType::Bool.into(),
                     value: *bool as i64,
                 };
-                self.alloc_value(bool_value.into())
+                self.module.alloc_value(bool_value.into())
             }
             Literal::String(_string) => {
                 todo!("build string literal")
