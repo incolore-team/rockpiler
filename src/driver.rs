@@ -3,7 +3,7 @@ use log::trace;
 use crate::{
     cli::Args,
     ir_printer,
-    pass::{inst_namer, mem2reg},
+    ir_pass::{inst_namer, mem2reg},
     scope::SymbolTable,
     sema::ToSemaTrait,
 };
