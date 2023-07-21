@@ -1,3 +1,4 @@
+use log::trace;
 use std::{collections::VecDeque, fmt::Binary};
 
 use crate::{ast::*, ir::*, scope::*};
@@ -231,9 +232,64 @@ impl Builder {
                 self.build_block_statement(block_stmt);
             }
             Stmt::Break => self.build_break_statement(),
-            Stmt::DoWhile(_) => todo!(),
+            Stmt::DoWhile(do_while_stmt) => self.build_do_while_statement(do_while_stmt),
             Stmt::Continue => self.build_continue_statement(),
         }
+    }
+
+    /*
+    int main() {
+        int i = 0;
+        do {
+            i++;
+        } while (i < 10)
+        return 0;
+    }
+
+    ; LLVM IR 代码
+    define dso_local i32 @main() {
+    entry:
+      %i = alloca i32, align 4
+      store i32 0, i32* %i, align 4
+      br label %do.body
+
+    do.body:                                       ; preds = %while.cond
+      %0 = load i32, ptr %i, align 4
+      %inc = add nsw i32 %0, 1
+      store i32 %inc, ptr %i, align 4
+      br label %do.cond
+
+    do.cond:                                       ; preds = %while.body, %entry
+      %1 = load i32, ptr %i, align 4
+      %cmp = icmp slt i32 %1, 10
+      br i1 %cmp, label %do.body, label %do.end
+
+    do.end:                                        ; preds = %while.cond
+      ret i32 0
+    }
+     */
+    pub fn build_do_while_statement(&mut self, do_while_stmt: &DoWhileStmt) {
+        let body_bb = self.module.spawn_basic_block();
+        let cond_bb = self.module.spawn_basic_block();
+        let end_bb = self.module.alloc_basic_block();
+
+        self.loop_stack.push((end_bb, body_bb));
+        {
+            self.module.spawn_jump_inst(body_bb);
+
+            self.module.set_insert_point(body_bb);
+            self.build_statement(&do_while_stmt.stmt);
+            self.module.spawn_jump_inst(cond_bb);
+
+            self.module.set_insert_point(cond_bb);
+            let cond_value = self.build_expr(&do_while_stmt.cond, false);
+            self.module.spawn_br_inst(cond_value, body_bb, end_bb);
+
+            self.module.cur_func_mut().bbs.append(end_bb.clone());
+
+            self.module.set_insert_point(end_bb);
+        }
+        self.loop_stack.pop();
     }
 
     pub fn build_break_statement(&mut self) {
@@ -275,17 +331,21 @@ impl Builder {
                                     let mut deque = VecDeque::from(array_init_val.0.clone());
                                     // self.build_array_init_val(alloca_id, array_init_val, &const_at);
                                     self.build_array_init_val(alloca_id, &mut deque, &const_at);
+                                    self.module.sym2def.insert(
+                                        decl.sema_ref.as_ref().unwrap().symbol_id,
+                                        alloca_id,
+                                    );
                                 }
                             }
                         }
                         _ => {
                             let init_val_id = self.build_init_val(init_val, &decl.type_);
-                            self.module.spawn_store_inst(alloca_id, init_val_id);
+                            let store_id = self.module.spawn_store_inst(alloca_id, init_val_id);
+                            self.module
+                                .sym2def
+                                .insert(decl.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
                         }
                     }
-                    self.module
-                        .sym2def
-                        .insert(decl.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
                 }
                 None => {
                     self.module
@@ -512,56 +572,95 @@ impl Builder {
             }
             Expr::Prefix(prefix_expr) => {
                 let rhs = self.build_expr(&prefix_expr.rhs, false);
-                let converted_infix_op = match prefix_expr.op {
-                    PrefixOp::Incr => todo!(),
-                    PrefixOp::Decr => todo!(),
+                let ty = prefix_expr.infer_ty.as_ref().unwrap().clone();
+                match prefix_expr.op {
+                    PrefixOp::Incr => {
+                        let converted_infix_op = InfixOp::Add;
+                        let one = ConstValue::Int(ConstInt {
+                            ty: ty.clone(),
+                            value: 1,
+                        });
+                        let one_id = self.module.alloc_value(one.into());
+                        self.module
+                            .spawn_binop_inst(ty, converted_infix_op, one_id, rhs)
+                    }
+                    PrefixOp::Decr => {
+                        let converted_infix_op = InfixOp::Sub;
+                        let one = ConstValue::Int(ConstInt {
+                            ty: ty.clone(),
+                            value: 1,
+                        });
+                        let one_id = self.module.alloc_value(one.into());
+                        self.module
+                            .spawn_binop_inst(ty, converted_infix_op, one_id, rhs)
+                    }
                     PrefixOp::Not => todo!(),
                     PrefixOp::BitNot => todo!(),
-                    PrefixOp::Pos => InfixOp::Add,
-                    PrefixOp::Neg => InfixOp::Sub,
-                };
-                let ty = prefix_expr.infer_ty.as_ref().unwrap().clone();
-                let zero = ConstValue::zero_of(ty.clone());
-                let zero_id = self.module.alloc_value(zero.into());
-                self.module
-                    .spawn_binop_inst(ty, converted_infix_op, zero_id, rhs)
+                    PrefixOp::Pos => {
+                        let converted_infix_op = InfixOp::Add;
+                        let zero = ConstValue::zero_of(ty.clone());
+                        let zero_id = self.module.alloc_value(zero.into());
+                        self.module
+                            .spawn_binop_inst(ty, converted_infix_op, zero_id, rhs)
+                    }
+                    PrefixOp::Neg => {
+                        let converted_infix_op = InfixOp::Sub;
+                        let zero = ConstValue::zero_of(ty.clone());
+                        let zero_id = self.module.alloc_value(zero.into());
+                        self.module
+                            .spawn_binop_inst(ty, converted_infix_op, zero_id, rhs)
+                    }
+                }
             }
             Expr::Postfix(postfix_expr) => {
-                let _op: Option<_> = match postfix_expr.op {
-                    PostfixOp::Incr => Some(InfixOp::Add),
-                    PostfixOp::Decr => Some(InfixOp::Sub),
-                    PostfixOp::CallAccess(_) => {
-                        todo!()
+                let _lhs = self.build_expr(&postfix_expr.lhs, true);
+                match &postfix_expr.op {
+                    PostfixOp::Incr => {
+                        let _op = InfixOp::Add;
+                        let ty = postfix_expr.infer_ty.as_ref().unwrap().clone();
+                        let one = ConstValue::Int(ConstInt {
+                            ty: ty.clone(),
+                            value: 1,
+                        });
+                        let one_id = self.module.alloc_value(one.into());
+                        self.module.spawn_binop_inst(ty, _op, one_id, _lhs);
+                        _lhs
                     }
-                    PostfixOp::DotAccess(_) => {
-                        todo!()
+                    PostfixOp::Decr => {
+                        let _op = InfixOp::Sub;
+                        let ty = postfix_expr.infer_ty.as_ref().unwrap().clone();
+                        let one = ConstValue::Int(ConstInt {
+                            ty: ty.clone(),
+                            value: 1,
+                        });
+                        let one_id = self.module.alloc_value(one.into());
+                        self.module.spawn_binop_inst(ty, _op, one_id, _lhs);
+                        _lhs
                     }
-                    PostfixOp::IndexAccess(_) => None,
-                };
-                if let PostfixOp::IndexAccess(ia) = &postfix_expr.op {
-                    let _lhs = self.build_expr(&postfix_expr.lhs, true);
-                    let index = self.build_expr(&ia.index, false);
-                    let i32_zero_id = self.build_i32_val(0);
-                    let lhs = self.get_value(_lhs);
-                    // trace!("lhs: {:?}", lhs);
-                    let ty_ = match lhs {
-                        Value::Instruction(iv) => iv.ty(),
-                        _ => unreachable!(),
-                    };
-                    let infer_ty = &postfix_expr.infer_ty;
-                    let gep_inst_id = self.module.spawn_gep_inst(
-                        ty_,
-                        infer_ty.clone().unwrap(),
-                        _lhs,
-                        vec![i32_zero_id, index],
-                    );
-                    if let Some(Type::Builtin(_)) = infer_ty {
-                        let load_inst_id = self.module.spawn_load_inst(gep_inst_id);
-                        return load_inst_id;
+                    PostfixOp::IndexAccess(ia) => {
+                        let index = self.build_expr(&ia.index, false);
+                        let i32_zero_id = self.build_i32_val(0);
+                        let lhs = self.get_value(_lhs);
+                        // trace!("lhs: {:?}", lhs);
+                        let ty_ = match lhs {
+                            Value::Instruction(iv) => iv.ty(),
+                            _ => unreachable!(),
+                        };
+                        let infer_ty = &postfix_expr.infer_ty;
+                        let gep_inst_id = self.module.spawn_gep_inst(
+                            ty_,
+                            infer_ty.clone().unwrap(),
+                            _lhs,
+                            vec![i32_zero_id, index],
+                        );
+                        if let Some(Type::Builtin(_)) = infer_ty {
+                            let load_inst_id = self.module.spawn_load_inst(gep_inst_id);
+                            return load_inst_id;
+                        }
+                        gep_inst_id
                     }
-                    return gep_inst_id;
+                    _ => todo!(),
                 }
-                todo!()
             }
             Expr::Primary(primary_expr) => match primary_expr {
                 PrimaryExpr::Group(expr) => self.build_expr(expr, false),
