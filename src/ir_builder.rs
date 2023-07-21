@@ -1,7 +1,6 @@
-use log::trace;
-use std::{collections::VecDeque, fmt::Binary};
+use std::collections::VecDeque;
 
-use crate::{ast::*, ir::*, scope::*};
+use crate::{ast::*, infer_eval::InferEvaluator, ir::*, scope::*};
 
 pub fn build(ast: &mut TransUnit, syms: SymbolTable) -> Module {
     let mut builder = Builder::new(syms);
@@ -102,12 +101,14 @@ impl Builder {
         let initializer = var_decl
             .init
             .as_ref()
-            .map(|init_val| self.build_init_val(init_val, &ty));
+            .map(|init_val| self.build_global_init_val(init_val, &ty));
+        let initializer_id = initializer.map(|cv| self.module.alloc_value(cv.into()));
 
         let global_var = GlobalVariableValue {
             name: name.clone(),
             ty,
-            initializer,
+            initializer: initializer_id,
+            is_const: var_decl.is_const,
         };
 
         let global_var_id = self.module.alloc_value(Value::GlobalVariable(global_var));
@@ -189,12 +190,94 @@ impl Builder {
         }
     }
 
+    pub fn build_global_array_init_val(
+        &mut self,
+        deque: &mut VecDeque<InitVal>,
+        type_: &ConstantArrayType,
+    ) -> ConstValue {
+        let dim = type_.size;
+        let elem_type = type_.element_type.as_ref();
+        let mut values = vec![];
+        match elem_type {
+            Type::Array(at) => {
+                for _ in 0..dim {
+                    if let ArrayType::Constant(const_at) = at {
+                        let iv_ = deque.front().cloned();
+                        if let Some(iv) = iv_ {
+                            values.push(match iv {
+                                InitVal::Array(array_iv) => {
+                                    deque.pop_front();
+                                    let mut sub_deque = VecDeque::from(array_iv.0.clone());
+                                    self.build_global_array_init_val(&mut sub_deque, const_at)
+                                }
+                                InitVal::Expr(expr) => {
+                                    self.build_global_array_init_val(deque, const_at)
+                                }
+                            })
+                        }
+                    }
+                }
+            }
+            _ => {
+                for _ in 0..dim {
+                    let iv_ = deque.pop_front();
+                    if let Some(iv) = iv_ {
+                        let init_val = self.build_global_init_val(&iv, elem_type);
+                        values.push(init_val);
+                    }
+                }
+            }
+        }
+        ConstValue::Array(ConstArray {
+            ty: Type::Array(ArrayType::Constant(type_.clone())),
+            values: values,
+        })
+    }
+
+    pub fn build_global_init_val(&mut self, init_val: &InitVal, type_: &Type) -> ConstValue {
+        match init_val {
+            InitVal::Expr(expr) => {
+                let literal = expr.eval_literal(&self.module.syms).unwrap();
+                match literal {
+                    Literal::Int(val) => ConstValue::Int(ConstInt {
+                        ty: type_.clone(),
+                        value: val,
+                    }),
+                    _ => todo!(),
+                }
+            }
+            InitVal::Array(array_init_val) => {
+                if let Type::Array(ArrayType::Constant(const_at)) = type_ {
+                    let mut deque = VecDeque::from(array_init_val.0.clone());
+                    self.build_global_array_init_val(&mut deque, const_at)
+                    // let elem_type = const_at.element_type.as_ref();
+                    // let mut values = vec![];
+                    // for iv in &array_init_val.0 {
+                    //     let cv = self.build_global_init_val(&iv, &elem_type);
+                    //     values.push(cv);
+                    // }
+                    // let const_array = ConstArray {
+                    //     ty: type_.clone(),
+                    //     values,
+                    // };
+                    // ConstValue::Array(const_array)
+                } else {
+                    todo!()
+                }
+            }
+        }
+    }
+
     pub fn build_init_val(&mut self, init_val: &InitVal, type_: &Type) -> ValueId {
         match init_val {
             InitVal::Expr(expr) => self.build_expr(expr, false),
             InitVal::Array(array_init_val) => {
-                unreachable!();
-
+                unimplemented!()
+                // let ty = Type::Array(ArrayType::Constant(ConstantArrayType {
+                //     element_type: Box::new(type_.clone()), // Replace with the correct element type
+                //     size: array_init_val.0.len() as usize,
+                //     size_info: None,
+                // }));
                 // let values = array_init_val
                 //     .0
                 //     .iter()
@@ -202,7 +285,9 @@ impl Builder {
                 //     .collect();
 
                 // let const_array = ConstArray { ty, values };
-                //.module let const_id = self.module.alloc_value(Value::Const(ConstValue::Array(const_array)));
+                // let const_id = self
+                //     .module
+                //     .alloc_value(Value::Const(ConstValue::Array(const_array)));
                 // const_id
             }
         }

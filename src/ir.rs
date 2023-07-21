@@ -686,6 +686,7 @@ pub struct GlobalVariableValue {
     pub name: String,
     pub ty: Type,
     pub initializer: Option<ValueId>,
+    pub is_const: bool,
 }
 
 #[derive(Debug, Clone)]

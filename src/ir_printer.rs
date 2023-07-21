@@ -1,6 +1,7 @@
 use std::{any::Any, fmt::format};
 
 use clap::ValueEnum;
+use log::debug;
 
 use crate::{ast::*, ir::*};
 
@@ -33,9 +34,17 @@ impl<'a> Printer<'a> {
             }
             None => "zeroinitializer".to_string(),
         };
+        let constant = {
+            if var.is_const {
+                "constant"
+            } else {
+                "global"
+            }
+        };
         println!(
-            "@{} = global {} {}",
+            "@{} = {} {} {}",
             name,
+            constant,
             self.format_type(&var.ty),
             literal
         );
@@ -386,7 +395,40 @@ impl<'a> Printer<'a> {
                 format!("{}", i.value)
             }
             ConstValue::Float(_) => todo!(),
-            ConstValue::Array(_) => todo!(),
+            ConstValue::Array(ca) => {
+                // debug!("const_array: {:?}", ca);
+                if let Type::Array(ArrayType::Constant(const_at)) = &ca.ty {
+                    if ca.values.len() == 0 {
+                        return "zeroinitializer".to_string();
+                    }
+                    let mut ret = format!("[");
+                    let mut is_first = true;
+                    let dim = const_at.size;
+                    for i in 0..dim {
+                        if !is_first {
+                            ret += ", ";
+                        }
+                        let value = ca.values.get(i);
+                        match value {
+                            Some(cv) => {
+                                ret += &format!(
+                                    "{} {}",
+                                    self.format_type(&cv.ty()),
+                                    self.format_const(cv)
+                                );
+                            }
+                            None => {
+                                ret += &format!("{} 0", self.format_type(&val.ty()));
+                            }
+                        }
+                        is_first = false;
+                    }
+                    ret += "]";
+                    ret
+                } else {
+                    unreachable!()
+                }
+            }
         }
     }
 
