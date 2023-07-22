@@ -147,6 +147,16 @@ impl Module {
         }
     }
 
+    pub fn try_get_inst(&self, inst_id: ValueId) -> Option<&InstValue> {
+        match &self.values[inst_id] {
+            Value::Instruction(inst) => Some(inst),
+            _ => {
+                debug!("Value: {:?}, expect an instruction", &self.values[inst_id]);
+                None
+            }
+        }
+    }
+
     pub fn get_global_var(&self, var_id: ValueId) -> &GlobalVariableValue {
         match &self.values[var_id] {
             Value::GlobalVariable(gv) => gv,
@@ -457,11 +467,14 @@ impl Module {
     pub fn spawn_store_inst(&mut self, ptr: ValueId, value: ValueId) -> ValueId {
         {
             // make sure ptr is a pointer
-            let inst = self.get_inst(ptr);
-            match inst {
-                InstValue::Alloca(_) => {}
-                InstValue::Gep(_) => {}
-                _ => panic!("ptr is not a pointer"),
+            let inst_ = self.try_get_inst(ptr);
+            match inst_ {
+                Some(iv) => match iv {
+                    InstValue::Alloca(_) => {}
+                    InstValue::Gep(_) => {}
+                    _ => todo!(),
+                },
+                None => debug!("ptr is not a pointer"),
             }
         }
         let store = StoreInst { ptr, value };

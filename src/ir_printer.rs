@@ -175,7 +175,11 @@ impl<'a> Printer<'a> {
             if i != 0 {
                 print!(", ");
             }
-            print!("{}", self.format_value(arg, arg_val));
+            print!(
+                "{} {}",
+                self.format_type(&arg_val.ty()),
+                self.format_value(arg, arg_val)
+            );
         }
         println!(")");
     }

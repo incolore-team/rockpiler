@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 
+use log::trace;
+
 use crate::{ast::*, infer_eval::InferEvaluator, ir::*, scope::*};
 
 pub fn build(ast: &mut TransUnit, syms: SymbolTable) -> Module {
@@ -729,7 +731,11 @@ impl Builder {
                         // trace!("lhs: {:?}", lhs);
                         let ty_ = match lhs {
                             Value::Instruction(iv) => iv.ty(),
-                            _ => unreachable!(),
+                            Value::GlobalVariable(gv) => gv.ty.clone(),
+                            _ => {
+                                trace!("ty_: {:?}", lhs);
+                                unreachable!()
+                            }
                         };
                         let infer_ty = &postfix_expr.infer_ty;
                         let gep_inst_id = self.module.spawn_gep_inst(
