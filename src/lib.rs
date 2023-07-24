@@ -2,6 +2,7 @@ extern crate lazy_static;
 #[macro_use]
 extern crate pest_derive;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub mod arm;
 pub mod ast;
 pub mod cli;
 pub mod driver;
