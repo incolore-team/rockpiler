@@ -23,6 +23,12 @@ impl Into<AsmFunction> for FunctionValue {
     }
 }
 
+impl Into<AsmBlock> for BasicBlockValue {
+    fn into(self) -> AsmBlock {
+        todo!()
+    }
+}
+
 impl McBuilder<'_> {
     fn new<'a>(ir_module: &'a Module) -> McBuilder<'a> {
         McBuilder {
@@ -61,7 +67,12 @@ impl McBuilder<'_> {
         let asm_func_id = self.module.alloc_value(AsmValue::Function(asm_func));
         self.module.functions.push(asm_func_id);
 
-        // TODO: 对应生成AsmBlock并放到Map里。
+        for (name, block_id) in &func.bbs.bbs.clone() {
+            let block = self.ir_module.get_bb(*block_id);
+            let asm_block = AsmBlock::from(block.clone().into());
+            let asm_block_id = self.module.alloc_value(AsmValue::Block(asm_block));
+            self.module.cur_func_mut().bbs.push(asm_block_id);
+        }
         // TODO: prologue
         // TODO: handle callling convention
     }
@@ -107,4 +118,46 @@ impl McBuilder<'_> {
     // fn build_operand(&mut self, operand: &Operand) -> asmOperand {
     //     todo!()
     // }
+}
+
+
+
+pub fn analyze_call_conv(func: FunctionValue) -> VfpCallingConvention {
+    if ret_ty == AsmTypeTag::FLOAT {
+        self.ret_reg = VfpReg{idx: 0};
+    } else if ret_ty == AsmTypeTag::INT {
+        self.ret_reg = Reg(RegType::R0).into();
+    }
+
+    for param in params {
+        assert!(param.base_type != AsmTypeTag::DOUBLE);
+        let size = 4;
+        if param.is_base_float() { // if is VFP CPRC (Co-processor Register Candidate)
+            if self.next_vfp < 16 {
+                let result = VfpReg(self.next_vfp).into();
+                self.call_param.push(result.clone());
+                self.self_arg.push(result);
+                self.next_vfp += 1;
+            } else {
+                assert_eq!(self.next_vfp, 16);
+                let result = StackOperand(StackOperandType::CALL_PARAM, self.nsaa).into();
+                self.call_param.push(result.clone());
+                self.self_arg.push(StackOperand(StackOperandType::SELF_ARG, self.nsaa + 8).into());
+                self.nsaa += size;
+            }
+        } else {
+            if (self.ncrn + (size / 4)) <= 4 { // 寄存器能分配下
+                let result = Reg(RegType::values()[self.ncrn as usize]).into();
+                self.call_param.push(result.clone());
+                self.self_arg.push(result);
+                self.ncrn = self.ncrn + (size / 4);
+            } else {
+                assert_eq!(self.ncrn, 4);
+                self.call_param.push(StackOperand(StackOperandType::CALL_PARAM, self.nsaa).into());
+                self.self_arg.push(StackOperand(StackOperandType::SELF_ARG, self.nsaa + 8).into());
+                self.nsaa += size;
+            }
+        }
+    }
+    self
 }
