@@ -212,6 +212,14 @@ impl Module {
         self.cur_func = Some(func);
     }
 
+    pub fn cur_func_value_id(&self) -> ValueId {
+        self.cur_func.unwrap()
+    }
+
+    pub fn cur_bb_value_id(&self) -> ValueId {
+        self.cur_bb.unwrap()
+    }
+
     pub fn inspect_value(&self, value_id: ValueId) -> String {
         let value = &self.values[value_id];
         match value {
@@ -709,7 +717,7 @@ pub struct FunctionValue {
     pub ret_ty: Type,
     pub bbs: BasicBlockList, // BasicBlocks
     pub is_external: bool,
-    pub is_var_arg: bool,
+    pub is_variadic: bool,
 }
 
 impl FunctionValue {
@@ -718,7 +726,7 @@ impl FunctionValue {
         params: Vec<ValueId>,
         ret_ty: Type,
         is_external: bool,
-        is_var_arg: bool,
+        is_variadic: bool,
     ) -> Self {
         FunctionValue {
             name,
@@ -726,7 +734,7 @@ impl FunctionValue {
             ret_ty,
             bbs: BasicBlockList::default(),
             is_external,
-            is_var_arg,
+            is_variadic,
         }
     }
 
@@ -1085,6 +1093,13 @@ impl ConstValue {
                 value: 0,
             }),
             _ => unimplemented!(),
+        }
+    }
+
+    pub fn is_array(&self) -> bool {
+        match self {
+            ConstValue::Array(_) => true,
+            _ => false,
         }
     }
 }

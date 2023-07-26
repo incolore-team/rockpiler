@@ -5,9 +5,9 @@ pub enum AsmValue {
     Instruction(AsmInst),
 }
 
-type AsmValueId = id_arena::Id<AsmValue>;
-/// VirtReg -> PhyReg
-type RegConstraintMap = std::collections::HashMap<AsmValueId, IntReg>;
+pub type AsmValueId = id_arena::Id<AsmValue>;
+/// VirtReg -> PhyReg (General or VFP)
+pub type RegConstraintMap = std::collections::HashMap<AsmValueId, AsmOperand>;
 
 pub struct AsmModule {
     values: id_arena::Arena<AsmValue>,
@@ -51,6 +51,14 @@ impl AsmModule {
         } else {
             panic!("current value is not a block");
         }
+    }
+
+    pub fn cur_func_value_id(&self) -> AsmValueId {
+        self.cur_func.unwrap()
+    }
+
+    pub fn cur_bb_value_id(&self) -> AsmValueId {
+        self.cur_bb.unwrap()
     }
 
     pub fn cur_bb(&self) -> &AsmBlock {
@@ -133,25 +141,7 @@ impl AsmModule {
         self.values.alloc(value)
     }
 }
-#[derive(Debug, PartialEq, Clone)]
 
-pub enum AsmInst {
-    Call(CallInst),
-}
-#[derive(Debug, PartialEq, Clone)]
-
-pub struct CallInst {
-    /// jump target
-    pub label: AsmValueId,
-    /// used to bind args to calling convention registers
-    pub in_constraints: RegConstraintMap,
-    pub out_constraints: RegConstraintMap,
-}
-#[derive(Debug, PartialEq, Clone)]
-
-pub struct Prologue {
-    pub out_constraints: RegConstraintMap,
-}
 #[derive(Debug, PartialEq, Clone)]
 
 pub enum AsmOperand {
@@ -162,12 +152,64 @@ pub enum AsmOperand {
     VfpDoubleReg(VfpDoubleReg),
     VfpReg(VfpReg),
 }
+
+impl AsmOperand {
+    pub fn is_stack_operand(&self) -> bool {
+        match self {
+            AsmOperand::StackOperand(_) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 
 pub enum Imm {
     FloatImm(FloatImm),
     IntImm(IntImm),
     LabelImm(LabelImm),
+}
+
+impl ImmTrait for Imm {
+    fn highest_one_bit(&self) -> u32 {
+        match self {
+            Imm::FloatImm(imm) => imm.highest_one_bit(),
+            Imm::IntImm(imm) => imm.highest_one_bit(),
+            Imm::LabelImm(imm) => imm.highest_one_bit(),
+        }
+    }
+
+    fn lowest_dword(&self) -> Imm {
+        match self {
+            Imm::FloatImm(imm) => imm.lowest_dword(),
+            Imm::IntImm(imm) => imm.lowest_dword(),
+            Imm::LabelImm(imm) => imm.lowest_dword(),
+        }
+    }
+
+    fn highest_dword(&self) -> Imm {
+        match self {
+            Imm::FloatImm(imm) => imm.highest_dword(),
+            Imm::IntImm(imm) => imm.highest_dword(),
+            Imm::LabelImm(imm) => imm.highest_dword(),
+        }
+    }
+
+    fn lowest_word(&self) -> Imm {
+        match self {
+            Imm::FloatImm(imm) => imm.lowest_word(),
+            Imm::IntImm(imm) => imm.lowest_word(),
+            Imm::LabelImm(imm) => imm.lowest_word(),
+        }
+    }
+
+    fn highest_word(&self) -> Imm {
+        match self {
+            Imm::FloatImm(imm) => imm.highest_word(),
+            Imm::IntImm(imm) => imm.highest_word(),
+            Imm::LabelImm(imm) => imm.highest_word(),
+        }
+    }
 }
 
 pub trait ImmTrait {
@@ -473,9 +515,12 @@ pub enum CallConv {
     BaseCallConv(BaseCallConv),
     VfpCallConv(VfpCallConv),
 }
+use core::fmt;
 /// ARM ABI calling convention
 /// https://learn.microsoft.com/zh-cn/cpp/build/overview-of-arm-abi-conventions?view=msvc-170
 use std::collections::LinkedList;
+
+use crate::mc_inst::AsmInst;
 
 pub struct BaseCallConv {
     call_param: LinkedList<AsmOperand>,
@@ -563,6 +608,7 @@ impl CallConvTrait for BaseCallConv {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct VfpCallConv {
     // 结果有几种情况：1是r0-r3，2是在s0-s15，3是在内存里（StackOperand）。
     pub call_param: Vec<AsmOperand>,

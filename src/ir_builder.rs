@@ -52,8 +52,8 @@ impl Builder {
             params.push(param_value);
         }
 
-        let is_var_arg = false;
-        let mut cur_func = FunctionValue::new(name, params, ret_ty, is_external, is_var_arg);
+        let is_variadic = false;
+        let mut cur_func = FunctionValue::new(name, params, ret_ty, is_external, is_variadic);
 
         if !is_external {
             let entry_bb = BasicBlockValue::new("entry".to_string());

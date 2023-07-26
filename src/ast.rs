@@ -296,6 +296,24 @@ pub enum Type {
     Function(FunctionType),
 }
 
+impl Type {
+    pub fn is_pointer(&self, strict: bool) -> bool {
+        if strict {
+            matches!(self, Type::Pointer(_))
+        } else {
+            matches!(self, Type::Pointer(_) | Type::Array(_))
+        }
+    }
+
+    pub fn base_type(&self) -> &Type {
+        match self {
+            Type::Pointer(pointer) => &*pointer.base_type(),
+            Type::Array(array) => array.base_type(),
+            _ => self,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum BuiltinType {
     Void,
@@ -393,6 +411,10 @@ impl PointerType {
             type_: Box::new(type_),
         }
     }
+
+    pub fn base_type(&self) -> &Type {
+        self.type_.base_type()
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -406,6 +428,13 @@ impl ArrayType {
         match self {
             ArrayType::Constant(array_type) => &array_type.element_type,
             ArrayType::Incomplete(array_type) => &array_type.element_type,
+        }
+    }
+
+    pub fn base_type(&self) -> &Type {
+        match self {
+            ArrayType::Constant(array_type) => array_type.element_type.base_type(),
+            ArrayType::Incomplete(array_type) => array_type.element_type.base_type(),
         }
     }
 }
