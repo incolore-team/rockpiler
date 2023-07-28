@@ -2,7 +2,7 @@ pub enum AsmValue {
     Block(AsmBlock),
     GlobalVariable(AsmGlobalVariable),
     Function(AsmFunction),
-    Instruction(AsmInst),
+    Inst(AsmInst),
 }
 
 pub type AsmValueId = id_arena::Id<AsmValue>;
@@ -69,6 +69,107 @@ impl AsmModule {
             panic!("current value is not a block");
         }
     }
+
+    pub fn get_global_variable(&self, id: AsmValueId) -> &AsmGlobalVariable {
+        if let AsmValue::GlobalVariable(global) = self.values.get(id).unwrap() {
+            global
+        } else {
+            panic!("value is not a global variable");
+        }
+    }
+
+    pub fn get_bb_mut(&mut self, id: AsmValueId) -> &mut AsmBlock {
+        if let AsmValue::Block(bb) = self.values.get_mut(id).unwrap() {
+            bb
+        } else {
+            panic!("value is not a block");
+        }
+    }
+
+    pub fn get_bb(&self, id: AsmValueId) -> &AsmBlock {
+        if let AsmValue::Block(bb) = self.values.get(id).unwrap() {
+            bb
+        } else {
+            panic!("value is not a block");
+        }
+    }
+
+    pub fn get_inst(&self, id: AsmValueId) -> &AsmInst {
+        if let AsmValue::Inst(inst) = self.values.get(id).unwrap() {
+            inst
+        } else {
+            panic!("value is not an instruction");
+        }
+    }
+
+    pub fn get_inst_mut(&mut self, id: AsmValueId) -> &mut AsmInst {
+        if let AsmValue::Inst(inst) = self.values.get_mut(id).unwrap() {
+            inst
+        } else {
+            panic!("value is not an instruction");
+        }
+    }
+
+    pub fn set_inst(&mut self, id: AsmValueId, new_inst: AsmInst) {
+        if let AsmValue::Inst(inst) = self.values.get_mut(id).unwrap() {
+            *inst = new_inst;
+        } else {
+            panic!("value is not an instruction");
+        }
+    }
+
+    pub fn load_imm(&mut self, reg: AsmOperand, imm: &Imm) -> Vec<AsmValueId> {
+        let mut ret = Vec::new();
+        if let Imm::Float(fimm) = imm {
+            let tmp = IntReg::new(RegType::Ip);
+            ret.extend(self.load_imm(tmp.clone().into(), &Imm::Int(fimm.cast_to_raw_int().into())));
+            let inst: AsmInst = VMovInst::new(VMovType::A2S, reg, tmp.clone().into()).into();
+            let inst_id = self.values.alloc(AsmValue::Inst(inst));
+            ret.push(inst_id);
+        } else if let Imm::Label(_) | Imm::Int(_) = imm {
+            if imm.highest_one_bit() < 65535 {
+                // ret.push(MovInst::new(MovType::Movw, reg.clone(), imm.clone().into()).into());
+                let inst: AsmInst =
+                    MovInst::new(MovType::Movw, reg.clone(), imm.clone().into()).into();
+                let inst_id = self.values.alloc(AsmValue::Inst(inst));
+                ret.push(inst_id);
+            } else {
+                // ret.push(MovInst::new(MovType::Movw, reg.clone(), imm.lowest_word().into()).into());
+                let inst: AsmInst =
+                    MovInst::new(MovType::Movw, reg.clone(), imm.lowest_word().into()).into();
+                let inst_id = self.values.alloc(AsmValue::Inst(inst));
+                ret.push(inst_id);
+                // ret.push(MovInst::new(MovType::Movt, reg.clone(), imm.highest_word().into()).into(),);
+                let inst: AsmInst =
+                    MovInst::new(MovType::Movt, reg.clone(), imm.highest_word().into()).into();
+                let inst_id = self.values.alloc(AsmValue::Inst(inst));
+                ret.push(inst_id);
+            }
+        } else {
+            panic!("Unsupported immediate type.");
+        }
+        ret
+    }
+
+    pub fn add_all_before_branch(&mut self, bb_id: AsmValueId, insts: Vec<AsmValueId>) {
+        let mut i = 0;
+        let bb_cloned = self.get_bb(bb_id).clone();
+        while i < bb_cloned.insts.len() {
+            let vid = bb_cloned.insts[i];
+            let v = self.values.get(vid).unwrap();
+            if let AsmValue::Inst(inst) = v {
+                if let AsmInst::Br(_) = inst {
+                    break;
+                }
+            }
+            i += 1;
+        }
+        let mut cloned_old = bb_cloned.insts.clone();
+        cloned_old.splice(i..i, insts);
+
+        let bb = self.get_bb_mut(bb_id);
+        bb.insts = cloned_old;
+    }
 }
 
 pub struct AsmFunction {
@@ -79,7 +180,10 @@ pub struct AsmFunction {
 }
 
 pub struct AsmGlobalVariable {
-    pub type_tag: AsmTypeTag,
+    pub base: AsmTypeTag,
+    // 用于填充导出的链接器符号的大小，和bss段时占用空间的大小。以字节为单位
+    pub size: usize,
+    pub imm: LabelImm,
 }
 #[derive(Debug, PartialEq, Clone)]
 pub enum AsmTypeTag {
@@ -123,6 +227,7 @@ pub struct AsmBlock {
     pub next: Option<AsmValueId>,
     pub preds: Vec<AsmValueId>,
     pub succs: Vec<AsmValueId>,
+    pub insts: Vec<AsmValueId>,
 }
 
 impl AsmModule {
@@ -160,54 +265,109 @@ impl AsmOperand {
             _ => false,
         }
     }
+
+    pub fn is_float(&self) -> bool {
+        match self {
+            AsmOperand::VfpDoubleReg(_) | AsmOperand::VfpReg(_) => true,
+            AsmOperand::Imm(imm) => imm.is_float(),
+            AsmOperand::VirtReg(reg) => reg.is_float,
+            _ => false,
+        }
+    }
+}
+
+impl From<Imm> for AsmOperand {
+    fn from(imm: Imm) -> Self {
+        AsmOperand::Imm(imm)
+    }
+}
+
+impl From<StackOperand> for AsmOperand {
+    fn from(operand: StackOperand) -> Self {
+        AsmOperand::StackOperand(operand)
+    }
+}
+
+impl From<VirtReg> for AsmOperand {
+    fn from(reg: VirtReg) -> Self {
+        AsmOperand::VirtReg(reg)
+    }
+}
+
+impl From<IntReg> for AsmOperand {
+    fn from(reg: IntReg) -> Self {
+        AsmOperand::IntReg(reg)
+    }
+}
+
+impl From<VfpDoubleReg> for AsmOperand {
+    fn from(reg: VfpDoubleReg) -> Self {
+        AsmOperand::VfpDoubleReg(reg)
+    }
+}
+
+impl From<VfpReg> for AsmOperand {
+    fn from(reg: VfpReg) -> Self {
+        AsmOperand::VfpReg(reg)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 
 pub enum Imm {
-    FloatImm(FloatImm),
-    IntImm(IntImm),
-    LabelImm(LabelImm),
+    Float(FloatImm),
+    Int(IntImm),
+    Label(LabelImm),
+}
+
+impl Imm {
+    pub fn is_float(&self) -> bool {
+        match self {
+            Imm::Float(_) => true,
+            Imm::Label(l) => l.is_float,
+            _ => false,
+        }
+    }
 }
 
 impl ImmTrait for Imm {
     fn highest_one_bit(&self) -> u32 {
         match self {
-            Imm::FloatImm(imm) => imm.highest_one_bit(),
-            Imm::IntImm(imm) => imm.highest_one_bit(),
-            Imm::LabelImm(imm) => imm.highest_one_bit(),
+            Imm::Float(imm) => imm.highest_one_bit(),
+            Imm::Int(imm) => imm.highest_one_bit(),
+            Imm::Label(imm) => imm.highest_one_bit(),
         }
     }
 
     fn lowest_dword(&self) -> Imm {
         match self {
-            Imm::FloatImm(imm) => imm.lowest_dword(),
-            Imm::IntImm(imm) => imm.lowest_dword(),
-            Imm::LabelImm(imm) => imm.lowest_dword(),
+            Imm::Float(imm) => imm.lowest_dword(),
+            Imm::Int(imm) => imm.lowest_dword(),
+            Imm::Label(imm) => imm.lowest_dword(),
         }
     }
 
     fn highest_dword(&self) -> Imm {
         match self {
-            Imm::FloatImm(imm) => imm.highest_dword(),
-            Imm::IntImm(imm) => imm.highest_dword(),
-            Imm::LabelImm(imm) => imm.highest_dword(),
+            Imm::Float(imm) => imm.highest_dword(),
+            Imm::Int(imm) => imm.highest_dword(),
+            Imm::Label(imm) => imm.highest_dword(),
         }
     }
 
     fn lowest_word(&self) -> Imm {
         match self {
-            Imm::FloatImm(imm) => imm.lowest_word(),
-            Imm::IntImm(imm) => imm.lowest_word(),
-            Imm::LabelImm(imm) => imm.lowest_word(),
+            Imm::Float(imm) => imm.lowest_word(),
+            Imm::Int(imm) => imm.lowest_word(),
+            Imm::Label(imm) => imm.lowest_word(),
         }
     }
 
     fn highest_word(&self) -> Imm {
         match self {
-            Imm::FloatImm(imm) => imm.highest_word(),
-            Imm::IntImm(imm) => imm.highest_word(),
-            Imm::LabelImm(imm) => imm.highest_word(),
+            Imm::Float(imm) => imm.highest_word(),
+            Imm::Int(imm) => imm.highest_word(),
+            Imm::Label(imm) => imm.highest_word(),
         }
     }
 }
@@ -240,10 +400,34 @@ pub struct VirtReg {
     pub is_float: bool,
 }
 
+impl VirtReg {
+    pub fn new(index: i32, is_float: bool) -> Self {
+        Self { index, is_float }
+    }
+}
+
+impl From<i64> for VirtReg {
+    fn from(val: i64) -> Self {
+        assert!(val >= 0);
+        Self {
+            index: val as i32,
+            is_float: false,
+        }
+    }
+}
 #[derive(Debug, PartialEq, Clone)]
 pub struct IntReg {
     pub ty: RegType,
     pub is_float: bool,
+}
+
+impl IntReg {
+    pub fn new(ty: RegType) -> Self {
+        Self {
+            ty,
+            is_float: false,
+        }
+    }
 }
 
 impl From<i64> for IntReg {
@@ -369,6 +553,15 @@ impl FloatImm {
     }
 }
 
+impl From<f32> for FloatImm {
+    fn from(val: f32) -> Self {
+        Self {
+            value: val,
+            is_float: true,
+        }
+    }
+}
+
 impl ImmTrait for FloatImm {
     fn highest_one_bit(&self) -> u32 {
         let raw = self.cast_to_raw_int();
@@ -383,26 +576,26 @@ impl ImmTrait for FloatImm {
 
     fn lowest_dword(&self) -> Imm {
         let raw = self.cast_to_raw_int();
-        Imm::IntImm(IntImm {
+        Imm::Int(IntImm {
             value: raw & 0xffff_ffff,
         })
     }
 
     fn highest_dword(&self) -> Imm {
         let raw = self.cast_to_raw_int();
-        Imm::IntImm(IntImm { value: raw >> 32 })
+        Imm::Int(IntImm { value: raw >> 32 })
     }
 
     fn lowest_word(&self) -> Imm {
         let raw = self.cast_to_raw_int();
-        Imm::IntImm(IntImm {
+        Imm::Int(IntImm {
             value: raw & 0xffff,
         })
     }
 
     fn highest_word(&self) -> Imm {
         let raw = self.cast_to_raw_int();
-        Imm::IntImm(IntImm {
+        Imm::Int(IntImm {
             value: (raw >> 16) & 0xffff,
         })
     }
@@ -411,6 +604,18 @@ impl ImmTrait for FloatImm {
 #[derive(Debug, PartialEq, Clone)]
 pub struct IntImm {
     pub value: u32,
+}
+
+impl From<u32> for IntImm {
+    fn from(val: u32) -> Self {
+        Self { value: val }
+    }
+}
+
+impl From<i32> for IntImm {
+    fn from(val: i32) -> Self {
+        Self { value: val as u32 }
+    }
 }
 
 impl ImmTrait for IntImm {
@@ -425,25 +630,25 @@ impl ImmTrait for IntImm {
     }
 
     fn lowest_dword(&self) -> Imm {
-        Imm::IntImm(IntImm {
+        Imm::Int(IntImm {
             value: self.value & 0xffff_ffff,
         })
     }
 
     fn highest_dword(&self) -> Imm {
-        Imm::IntImm(IntImm {
+        Imm::Int(IntImm {
             value: self.value >> 32,
         })
     }
 
     fn lowest_word(&self) -> Imm {
-        Imm::IntImm(IntImm {
+        Imm::Int(IntImm {
             value: self.value & 0xffff,
         })
     }
 
     fn highest_word(&self) -> Imm {
-        Imm::IntImm(IntImm {
+        Imm::Int(IntImm {
             value: (self.value >> 16) & 0xffff,
         })
     }
@@ -472,7 +677,7 @@ impl ImmTrait for LabelImm {
     }
 
     fn lowest_dword(&self) -> Imm {
-        return Imm::LabelImm(LabelImm {
+        return Imm::Label(LabelImm {
             state: LabelImmState::Low,
             label: self.label.clone(),
             is_float: false,
@@ -480,7 +685,7 @@ impl ImmTrait for LabelImm {
     }
 
     fn highest_dword(&self) -> Imm {
-        return Imm::LabelImm(LabelImm {
+        return Imm::Label(LabelImm {
             state: LabelImmState::High,
             label: self.label.clone(),
             is_float: false,
@@ -488,7 +693,7 @@ impl ImmTrait for LabelImm {
     }
 
     fn lowest_word(&self) -> Imm {
-        return Imm::LabelImm(LabelImm {
+        return Imm::Label(LabelImm {
             state: LabelImmState::Low,
             label: self.label.clone(),
             is_float: false,
@@ -496,7 +701,7 @@ impl ImmTrait for LabelImm {
     }
 
     fn highest_word(&self) -> Imm {
-        return Imm::LabelImm(LabelImm {
+        return Imm::Label(LabelImm {
             state: LabelImmState::High,
             label: self.label.clone(),
             is_float: false,
@@ -511,6 +716,7 @@ pub enum LabelImmState {
     Low,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum CallConv {
     BaseCallConv(BaseCallConv),
     VfpCallConv(VfpCallConv),
@@ -520,8 +726,9 @@ use core::fmt;
 /// https://learn.microsoft.com/zh-cn/cpp/build/overview-of-arm-abi-conventions?view=msvc-170
 use std::collections::LinkedList;
 
-use crate::mc_inst::AsmInst;
+use crate::mc_inst::{AsmInst, MovInst, MovType, VMovInst, VMovType};
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct BaseCallConv {
     call_param: LinkedList<AsmOperand>,
     ret_reg: AsmOperand,

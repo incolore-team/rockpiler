@@ -1,180 +1,721 @@
-/*
+use core::fmt;
 
-rewrite in Rust. But Don't save parent in any Inst struct. Use enum instead of trait
+use crate::mc::{
+    AsmOperand, AsmValueId, CallConv, Imm, ImmTrait, IntReg, RegConstraintMap, RegType,
+    StackOperand,
+};
 
-// VSTR{C} Fd, [Rn{, #<immed>}] imm范围0-1020
-public class VLDRInst extends AsmInst implements StackOpInst {
-    public VLDRInst(AsmBlock p, AsmOperand dest, AsmOperand addr) {
-        parent = p;
-        defs.add(dest);
-        uses.add(addr);
-    }
+#[derive(Debug, PartialEq, Clone)]
+pub struct ConstraintsComponent {
+    pub in_constraints: RegConstraintMap,
+    pub out_constraints: RegConstraintMap,
+}
 
-    @Override
-    public String toString() {
-        return String.format("VLDR\t%s, [%s]",
-            defs.get(0).toString(), uses.get(0).toString());
-    }
-
-    @Override
-    public boolean isImmFit(StackOperand so) {
-        return VLDRInst.isImmFitStatic(so);
-    }
-
-    // `VSTR/VLDR Fd, [Rn{, #<immed>}]`  Immediate range 0-1020, multiple of 4.
-    public static boolean isImmFitStatic(StackOperand so) {
-        assert (so.offset % 4) == 0;
-        if (so.offset >= 0 && so.offset <= 1020) {
-            return true;
+impl Default for ConstraintsComponent {
+    fn default() -> Self {
+        Self {
+            in_constraints: RegConstraintMap::new(),
+            out_constraints: RegConstraintMap::new(),
         }
-        return false;
     }
 }
 
-public class BinOpInst extends AsmInst implements ImmOpInst {
-    public BinaryOp op;
-
-    public BinOpInst(AsmBlock p, BinaryOp op, AsmOperand to, AsmOperand op1, AsmOperand op2) {
-        parent = p;
-        this.op = op;
-        defs.add(to);
-        uses.add(op1);
-        uses.add(op2);
-    }
-
-    public static String opToString(BinaryOp op) {
-        switch(op) {
-            case ADD: return "ADD";
-            case DIV: return "SDIV";
-            case MUL: return "MUL";
-            case SUB: return "SUB";
-            default: return null;
+impl ConstraintsComponent {
+    pub fn new(in_constraints: RegConstraintMap, out_constraints: RegConstraintMap) -> Self {
+        Self {
+            in_constraints,
+            out_constraints,
         }
-    }
-
-    @Override
-    public String toString() {
-        return String.format("%s\t%s, %s, %s", opToString(op), defs.get(0).toString(),
-                                    uses.get(0).toString(), uses.get(1).toString());
-    }
-
-    public boolean isImmFit(Imm m) {
-        if (op == BinaryOp.ADD || op == BinaryOp.SUB) {
-            return Operand2.isImmFit(m);
-        }
-        return false;
     }
 }
 
+pub trait ConstraintsTrait {
+    fn get_in_constraints(&self) -> &RegConstraintMap;
+    fn get_out_constraints(&self) -> &RegConstraintMap;
+    fn get_in_constraints_mut(&mut self) -> &mut RegConstraintMap;
+    fn get_out_constraints_mut(&mut self) -> &mut RegConstraintMap;
+    fn set_in_constraints(&mut self, in_constraints: RegConstraintMap);
+    fn set_out_constraints(&mut self, out_constraints: RegConstraintMap);
+}
 
-public class BrInst extends AsmInst {
-    public Cond cond;
-    public AsmBlock target;
+macro_rules! impl_constraints_trait {
+    ($t:ty) => {
+        impl ConstraintsTrait for $t {
+            fn get_in_constraints(&self) -> &RegConstraintMap {
+                &self.constraints.in_constraints
+            }
 
-    public static class Builder {
-        private BrInst inst;
+            fn get_out_constraints(&self) -> &RegConstraintMap {
+                &self.constraints.out_constraints
+            }
 
-        public Builder(AsmBlock parent, AsmBlock target) {
-            inst = new BrInst();
-            inst.parent = parent;
-            inst.target = target;
-            inst.cond = Cond.AL;
+            fn get_in_constraints_mut(&mut self) -> &mut RegConstraintMap {
+                &mut self.constraints.in_constraints
+            }
+
+            fn get_out_constraints_mut(&mut self) -> &mut RegConstraintMap {
+                &mut self.constraints.out_constraints
+            }
+
+            fn set_in_constraints(&mut self, in_constraints: RegConstraintMap) {
+                self.constraints.in_constraints = in_constraints;
+            }
+
+            fn set_out_constraints(&mut self, out_constraints: RegConstraintMap) {
+                self.constraints.out_constraints = out_constraints;
+            }
         }
+    };
+}
 
-        public Builder addCond(Cond c) {
-            inst.cond = c;
-            return this;
-        }
+#[derive(Debug, PartialEq, Clone)]
+pub struct AsmOperandComponent {
+    pub defs: Vec<AsmOperand>,
+    pub uses: Vec<AsmOperand>,
+}
 
-        public Builder addComment(String c) {
-            inst.comment = c;
-            return this;
-        }
-
-        public BrInst build() {
-            return inst;
-        }
-    }
-
-    @Override
-    public String toString() {
-        return String.format("B%s\t%s", cond.toString(), target.label);
+impl AsmOperandComponent {
+    pub fn new(defs: Vec<AsmOperand>, uses: Vec<AsmOperand>) -> AsmOperandComponent {
+        AsmOperandComponent { defs, uses }
     }
 }
 
+pub trait AsmInstTrait {
+    fn get_defs(&self) -> Vec<AsmOperand>;
+    fn get_uses(&self) -> Vec<AsmOperand>;
+    fn get_uses_mut(&mut self) -> &mut Vec<AsmOperand>;
+    fn get_defs_mut(&mut self) -> &mut Vec<AsmOperand>;
+    fn set_uses(&mut self, uses: Vec<AsmOperand>);
+    fn set_defs(&mut self, defs: Vec<AsmOperand>);
+}
 
-public class BXInst extends AsmInst {
-    public BXInst(AsmBlock p, AsmOperand op) {
-        parent = p;
-        uses.add(op);
+macro_rules! impl_asm_inst_trait_no_oprs {
+    ($t:ty) => {
+        impl AsmInstTrait for $t {
+            fn get_defs(&self) -> Vec<AsmOperand> {
+                unimplemented!()
+            }
+
+            fn get_uses(&self) -> Vec<AsmOperand> {
+                unimplemented!()
+            }
+
+            fn get_uses_mut(&mut self) -> &mut Vec<AsmOperand> {
+                unimplemented!()
+            }
+
+            fn get_defs_mut(&mut self) -> &mut Vec<AsmOperand> {
+                unimplemented!()
+            }
+
+            fn set_uses(&mut self, uses: Vec<AsmOperand>) {
+                unimplemented!()
+            }
+
+            fn set_defs(&mut self, defs: Vec<AsmOperand>) {
+                unimplemented!()
+            }
+        }
+    };
+}
+macro_rules! impl_asm_inst_trait {
+    ($t:ty) => {
+        impl AsmInstTrait for $t {
+            fn get_defs(&self) -> Vec<AsmOperand> {
+                self.oprs.defs.clone()
+            }
+
+            fn get_uses(&self) -> Vec<AsmOperand> {
+                self.oprs.uses.clone()
+            }
+
+            fn get_uses_mut(&mut self) -> &mut Vec<AsmOperand> {
+                &mut self.oprs.uses
+            }
+
+            fn get_defs_mut(&mut self) -> &mut Vec<AsmOperand> {
+                &mut self.oprs.defs
+            }
+
+            fn set_uses(&mut self, uses: Vec<AsmOperand>) {
+                self.oprs.uses = uses;
+            }
+
+            fn set_defs(&mut self, defs: Vec<AsmOperand>) {
+                self.oprs.defs = defs;
+            }
+        }
+    };
+}
+
+#[derive(Debug, PartialEq, Clone)]
+
+pub enum AsmInst {
+    BinOp(BinOpInst),
+    Br(BrInst),
+    BX(BXInst),
+    Call(CallInst),
+    CMP(CMPInst),
+    FBinOp(FBinOpInst),
+    FCMP(FCMPInst),
+    LDR(LDRInst),
+    Mov(MovInst),
+    STR(STRInst),
+    VCVT(VCVTInst),
+    VLDR(VLDRInst),
+    VMov(VMovInst),
+    VMRS(VMRSInst),
+    VSTR(VSTRInst),
+    Prologue(PrologueInst),
+    RetInst(RetInst),
+}
+
+macro_rules! impl_stack_op_inst_trait {
+    ($inst:ident) => {
+        impl StackOpInstTrait for $inst {
+            fn is_imm_fit(&self, so: &StackOperand) -> bool {
+                $inst::is_imm_fit(so)
+            }
+        }
+    };
+}
+
+impl StackOpInstTrait for AsmInst {
+    fn is_imm_fit(&self, so: &StackOperand) -> bool {
+        match self {
+            AsmInst::LDR(inst) => inst.is_imm_fit(so),
+            AsmInst::VLDR(inst) => inst.is_imm_fit(so),
+            AsmInst::STR(inst) => inst.is_imm_fit(so),
+            AsmInst::VSTR(inst) => inst.is_imm_fit(so),
+            _ => unreachable!("is_imm_fit: not a stack op inst"),
+        }
     }
 }
 
+impl_stack_op_inst_trait!(LDRInst);
+impl_stack_op_inst_trait!(VLDRInst);
+impl_stack_op_inst_trait!(STRInst);
+impl_stack_op_inst_trait!(VSTRInst);
 
-public class CallInst extends ConstrainRegInst {
-    public LabelImm target;
-    public CallingConvention cc;
-
-    public CallInst(AsmBlock p, LabelImm f, CallingConvention cc) {
-        parent = p;
-        target = f;
-        this.cc = cc;
-    }
-
-    @Override
-    public String toString() {
-        return String.format("BL\t%s", target.label);
-    }
-
-    // Call 指令设置约束使用更下面两个方法
-    @Override
-    public void setConstraint(VirtReg reg, Reg phyReg) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void setConstraint(VirtReg reg, VfpReg phyReg) {
-        throw new UnsupportedOperationException();
-    }
-
-    public void setConstraint(VirtReg reg, Reg phyReg, boolean argOrRet) {
-        if (argOrRet) {
-            inConstraints.put(phyReg, reg);
-        } else {
-            outConstraints.put(phyReg, reg);
+impl AsmInst {
+    pub fn as_bin_op(&self) -> Option<&BinOpInst> {
+        match self {
+            AsmInst::BinOp(inst) => Some(inst),
+            _ => None,
         }
     }
 
-    public void setConstraint(VirtReg reg, VfpReg phyReg, boolean argOrRet) {
-        if (argOrRet) {
-            inConstraints.put(phyReg, reg);
-        } else {
-            outConstraints.put(phyReg, reg);
+    pub fn as_bin_op_mut(&mut self) -> Option<&mut BinOpInst> {
+        match self {
+            AsmInst::BinOp(inst) => Some(inst),
+            _ => None,
         }
     }
 
+    pub fn as_br(&self) -> Option<&BrInst> {
+        match self {
+            AsmInst::Br(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_br_mut(&mut self) -> Option<&mut BrInst> {
+        match self {
+            AsmInst::Br(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_bx(&self) -> Option<&BXInst> {
+        match self {
+            AsmInst::BX(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_bx_mut(&mut self) -> Option<&mut BXInst> {
+        match self {
+            AsmInst::BX(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_call(&self) -> Option<&CallInst> {
+        match self {
+            AsmInst::Call(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_call_mut(&mut self) -> Option<&mut CallInst> {
+        match self {
+            AsmInst::Call(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_cmp(&self) -> Option<&CMPInst> {
+        match self {
+            AsmInst::CMP(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_cmp_mut(&mut self) -> Option<&mut CMPInst> {
+        match self {
+            AsmInst::CMP(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_fbin_op(&self) -> Option<&FBinOpInst> {
+        match self {
+            AsmInst::FBinOp(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_fbin_op_mut(&mut self) -> Option<&mut FBinOpInst> {
+        match self {
+            AsmInst::FBinOp(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_fcmp(&self) -> Option<&FCMPInst> {
+        match self {
+            AsmInst::FCMP(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_fcmp_mut(&mut self) -> Option<&mut FCMPInst> {
+        match self {
+            AsmInst::FCMP(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_ldr(&self) -> Option<&LDRInst> {
+        match self {
+            AsmInst::LDR(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_ldr_mut(&mut self) -> Option<&mut LDRInst> {
+        match self {
+            AsmInst::LDR(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_mov(&self) -> Option<&MovInst> {
+        match self {
+            AsmInst::Mov(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_mov_mut(&mut self) -> Option<&mut MovInst> {
+        match self {
+            AsmInst::Mov(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&STRInst> {
+        match self {
+            AsmInst::STR(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_str_mut(&mut self) -> Option<&mut STRInst> {
+        match self {
+            AsmInst::STR(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vcvt(&self) -> Option<&VCVTInst> {
+        match self {
+            AsmInst::VCVT(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vcvt_mut(&mut self) -> Option<&mut VCVTInst> {
+        match self {
+            AsmInst::VCVT(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vldr(&self) -> Option<&VLDRInst> {
+        match self {
+            AsmInst::VLDR(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vldr_mut(&mut self) -> Option<&mut VLDRInst> {
+        match self {
+            AsmInst::VLDR(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vmov(&self) -> Option<&VMovInst> {
+        match self {
+            AsmInst::VMov(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vmov_mut(&mut self) -> Option<&mut VMovInst> {
+        match self {
+            AsmInst::VMov(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vmrs(&self) -> Option<&VMRSInst> {
+        match self {
+            AsmInst::VMRS(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vmrs_mut(&mut self) -> Option<&mut VMRSInst> {
+        match self {
+            AsmInst::VMRS(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vstr(&self) -> Option<&VSTRInst> {
+        match self {
+            AsmInst::VSTR(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_vstr_mut(&mut self) -> Option<&mut VSTRInst> {
+        match self {
+            AsmInst::VSTR(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_prologue(&self) -> Option<&PrologueInst> {
+        match self {
+            AsmInst::Prologue(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_prologue_mut(&mut self) -> Option<&mut PrologueInst> {
+        match self {
+            AsmInst::Prologue(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_ret(&self) -> Option<&RetInst> {
+        match self {
+            AsmInst::RetInst(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_ret_mut(&mut self) -> Option<&mut RetInst> {
+        match self {
+            AsmInst::RetInst(inst) => Some(inst),
+            _ => None,
+        }
+    }
 }
 
-
-public class CMPInst extends AsmInst implements ImmOpInst {
-    public CMPInst(AsmBlock p, AsmOperand op1, AsmOperand op2) {
-        parent = p;
-        uses.add(op1);
-        uses.add(op2);
+impl AsmInstTrait for AsmInst {
+    fn get_defs(&self) -> Vec<AsmOperand> {
+        match self {
+            AsmInst::BinOp(inst) => inst.get_defs(),
+            AsmInst::Br(inst) => inst.get_defs(),
+            AsmInst::BX(inst) => inst.get_defs(),
+            AsmInst::Call(inst) => inst.get_defs(),
+            AsmInst::CMP(inst) => inst.get_defs(),
+            AsmInst::FBinOp(inst) => inst.get_defs(),
+            AsmInst::FCMP(inst) => inst.get_defs(),
+            AsmInst::LDR(inst) => inst.get_defs(),
+            AsmInst::Mov(inst) => inst.get_defs(),
+            AsmInst::STR(inst) => inst.get_defs(),
+            AsmInst::VCVT(inst) => inst.get_defs(),
+            AsmInst::VLDR(inst) => inst.get_defs(),
+            AsmInst::VMov(inst) => inst.get_defs(),
+            AsmInst::VMRS(inst) => inst.get_defs(),
+            AsmInst::VSTR(inst) => inst.get_defs(),
+            AsmInst::Prologue(inst) => inst.get_defs(),
+            AsmInst::RetInst(inst) => inst.get_defs(),
+        }
     }
 
-    @Override
-    public String toString() {
-        return String.format("CMP\t%s, %s",
-                    uses.get(0).toString(), uses.get(1).toString());
+    fn get_uses(&self) -> Vec<AsmOperand> {
+        match self {
+            AsmInst::BinOp(inst) => inst.get_uses(),
+            AsmInst::Br(inst) => inst.get_uses(),
+            AsmInst::BX(inst) => inst.get_uses(),
+            AsmInst::Call(inst) => inst.get_uses(),
+            AsmInst::CMP(inst) => inst.get_uses(),
+            AsmInst::FBinOp(inst) => inst.get_uses(),
+            AsmInst::FCMP(inst) => inst.get_uses(),
+            AsmInst::LDR(inst) => inst.get_uses(),
+            AsmInst::Mov(inst) => inst.get_uses(),
+            AsmInst::STR(inst) => inst.get_uses(),
+            AsmInst::VCVT(inst) => inst.get_uses(),
+            AsmInst::VLDR(inst) => inst.get_uses(),
+            AsmInst::VMov(inst) => inst.get_uses(),
+            AsmInst::VMRS(inst) => inst.get_uses(),
+            AsmInst::VSTR(inst) => inst.get_uses(),
+            AsmInst::Prologue(inst) => inst.get_uses(),
+            AsmInst::RetInst(inst) => inst.get_uses(),
+        }
     }
 
-    public boolean isImmFit(Imm m) {
-        return Operand2.isImmFit(m);
+    fn get_uses_mut(&mut self) -> &mut Vec<AsmOperand> {
+        match self {
+            AsmInst::BinOp(inst) => inst.get_uses_mut(),
+            AsmInst::Br(inst) => inst.get_uses_mut(),
+            AsmInst::BX(inst) => inst.get_uses_mut(),
+            AsmInst::Call(inst) => inst.get_uses_mut(),
+            AsmInst::CMP(inst) => inst.get_uses_mut(),
+            AsmInst::FBinOp(inst) => inst.get_uses_mut(),
+            AsmInst::FCMP(inst) => inst.get_uses_mut(),
+            AsmInst::LDR(inst) => inst.get_uses_mut(),
+            AsmInst::Mov(inst) => inst.get_uses_mut(),
+            AsmInst::STR(inst) => inst.get_uses_mut(),
+            AsmInst::VCVT(inst) => inst.get_uses_mut(),
+            AsmInst::VLDR(inst) => inst.get_uses_mut(),
+            AsmInst::VMov(inst) => inst.get_uses_mut(),
+            AsmInst::VMRS(inst) => inst.get_uses_mut(),
+            AsmInst::VSTR(inst) => inst.get_uses_mut(),
+            AsmInst::Prologue(inst) => inst.get_uses_mut(),
+            AsmInst::RetInst(inst) => inst.get_uses_mut(),
+        }
+    }
+
+    fn get_defs_mut(&mut self) -> &mut Vec<AsmOperand> {
+        match self {
+            AsmInst::BinOp(inst) => inst.get_defs_mut(),
+            AsmInst::Br(inst) => inst.get_defs_mut(),
+            AsmInst::BX(inst) => inst.get_defs_mut(),
+            AsmInst::Call(inst) => inst.get_defs_mut(),
+            AsmInst::CMP(inst) => inst.get_defs_mut(),
+            AsmInst::FBinOp(inst) => inst.get_defs_mut(),
+            AsmInst::FCMP(inst) => inst.get_defs_mut(),
+            AsmInst::LDR(inst) => inst.get_defs_mut(),
+            AsmInst::Mov(inst) => inst.get_defs_mut(),
+            AsmInst::STR(inst) => inst.get_defs_mut(),
+            AsmInst::VCVT(inst) => inst.get_defs_mut(),
+            AsmInst::VLDR(inst) => inst.get_defs_mut(),
+            AsmInst::VMov(inst) => inst.get_defs_mut(),
+            AsmInst::VMRS(inst) => inst.get_defs_mut(),
+            AsmInst::VSTR(inst) => inst.get_defs_mut(),
+            AsmInst::Prologue(inst) => inst.get_defs_mut(),
+            AsmInst::RetInst(inst) => inst.get_defs_mut(),
+        }
+    }
+
+    fn set_uses(&mut self, uses: Vec<AsmOperand>) {
+        match self {
+            AsmInst::BinOp(inst) => inst.set_uses(uses),
+            AsmInst::Br(inst) => inst.set_uses(uses),
+            AsmInst::BX(inst) => inst.set_uses(uses),
+            AsmInst::Call(inst) => inst.set_uses(uses),
+            AsmInst::CMP(inst) => inst.set_uses(uses),
+            AsmInst::FBinOp(inst) => inst.set_uses(uses),
+            AsmInst::FCMP(inst) => inst.set_uses(uses),
+            AsmInst::LDR(inst) => inst.set_uses(uses),
+            AsmInst::Mov(inst) => inst.set_uses(uses),
+            AsmInst::STR(inst) => inst.set_uses(uses),
+            AsmInst::VCVT(inst) => inst.set_uses(uses),
+            AsmInst::VLDR(inst) => inst.set_uses(uses),
+            AsmInst::VMov(inst) => inst.set_uses(uses),
+            AsmInst::VMRS(inst) => inst.set_uses(uses),
+            AsmInst::VSTR(inst) => inst.set_uses(uses),
+            AsmInst::Prologue(inst) => inst.set_uses(uses),
+            AsmInst::RetInst(inst) => inst.set_uses(uses),
+        }
+    }
+
+    fn set_defs(&mut self, defs: Vec<AsmOperand>) {
+        match self {
+            AsmInst::BinOp(inst) => inst.set_defs(defs),
+            AsmInst::Br(inst) => inst.set_defs(defs),
+            AsmInst::BX(inst) => inst.set_defs(defs),
+            AsmInst::Call(inst) => inst.set_defs(defs),
+            AsmInst::CMP(inst) => inst.set_defs(defs),
+            AsmInst::FBinOp(inst) => inst.set_defs(defs),
+            AsmInst::FCMP(inst) => inst.set_defs(defs),
+            AsmInst::LDR(inst) => inst.set_defs(defs),
+            AsmInst::Mov(inst) => inst.set_defs(defs),
+            AsmInst::STR(inst) => inst.set_defs(defs),
+            AsmInst::VCVT(inst) => inst.set_defs(defs),
+            AsmInst::VLDR(inst) => inst.set_defs(defs),
+            AsmInst::VMov(inst) => inst.set_defs(defs),
+            AsmInst::VMRS(inst) => inst.set_defs(defs),
+            AsmInst::VSTR(inst) => inst.set_defs(defs),
+            AsmInst::Prologue(inst) => inst.set_defs(defs),
+            AsmInst::RetInst(inst) => inst.set_defs(defs),
+        }
     }
 }
 
+macro_rules! impl_asm_from_trait {
+    ($field:ident, $t:ty) => {
+        impl From<$t> for AsmInst {
+            fn from(inst: $t) -> Self {
+                AsmInst::$field(inst)
+            }
+        }
+    };
+}
 
+impl_asm_from_trait!(BinOp, BinOpInst);
+impl_asm_from_trait!(Br, BrInst);
+impl_asm_from_trait!(BX, BXInst);
+impl_asm_from_trait!(Call, CallInst);
+impl_asm_from_trait!(CMP, CMPInst);
+impl_asm_from_trait!(FBinOp, FBinOpInst);
+impl_asm_from_trait!(FCMP, FCMPInst);
+impl_asm_from_trait!(LDR, LDRInst);
+impl_asm_from_trait!(Mov, MovInst);
+impl_asm_from_trait!(STR, STRInst);
+impl_asm_from_trait!(VCVT, VCVTInst);
+impl_asm_from_trait!(VLDR, VLDRInst);
+impl_asm_from_trait!(VMov, VMovInst);
+impl_asm_from_trait!(VMRS, VMRSInst);
+impl_asm_from_trait!(VSTR, VSTRInst);
+impl_asm_from_trait!(Prologue, PrologueInst);
+impl_asm_from_trait!(RetInst, RetInst);
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct RetInst {
+    pub func: AsmValueId,
+    pub constraints: ConstraintsComponent,
+}
+impl_asm_inst_trait_no_oprs!(RetInst);
+impl RetInst {
+    pub fn new(func: AsmValueId) -> Self {
+        Self {
+            func,
+            constraints: ConstraintsComponent::default(),
+        }
+    }
+}
+
+impl_constraints_trait!(RetInst);
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct PrologueInst {
+    pub func: AsmValueId,
+    pub constraints: ConstraintsComponent,
+}
+impl_asm_inst_trait_no_oprs!(PrologueInst);
+impl PrologueInst {
+    pub fn new(func: AsmValueId) -> Self {
+        Self {
+            func,
+            constraints: ConstraintsComponent::default(),
+        }
+    }
+}
+
+impl_constraints_trait!(PrologueInst);
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct VMRSInst {}
+impl_asm_inst_trait_no_oprs!(VMRSInst);
+#[derive(Debug, PartialEq, Clone)]
+pub enum VMovType {
+    CPY,
+    A2S,
+    S2A,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct VMovInst {
+    pub ty: VMovType,
+    pub oprs: AsmOperandComponent,
+}
+impl_asm_inst_trait!(VMovInst);
+impl VMovInst {
+    pub fn new(ty: VMovType, to: AsmOperand, from: AsmOperand) -> Self {
+        Self {
+            ty,
+            oprs: AsmOperandComponent::new(vec![to], vec![from]),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum VCVTType {
+    F2I,
+    I2F,
+    F2D,
+}
+#[derive(Debug, PartialEq, Clone)]
+pub struct VCVTInst {
+    pub ty: VCVTType,
+    pub oprs: AsmOperandComponent,
+}
+impl_asm_inst_trait!(VCVTInst);
+impl VCVTInst {
+    pub fn new(ty: VCVTType, to: AsmOperand, from: AsmOperand) -> Self {
+        Self {
+            ty,
+            oprs: AsmOperandComponent::new(vec![to], vec![from]),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum MovType {
+    Reg,
+    Movw,
+    Movt,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+
+pub struct MovInst {
+    pub ty: MovType,
+    pub cond: Cond,
+    pub oprs: AsmOperandComponent,
+}
+impl_asm_inst_trait!(MovInst);
+impl MovInst {
+    pub fn new(ty: MovType, to: AsmOperand, from: AsmOperand) -> Self {
+        Self {
+            ty,
+            oprs: AsmOperandComponent::new(vec![to], vec![from]),
+            cond: Cond::AL,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct FCMPInst {
+    pub oprs: AsmOperandComponent,
+}
+impl_asm_inst_trait!(FCMPInst);
+impl FCMPInst {
+    pub fn new(op1: AsmOperand, op2: AsmOperand) -> Self {
+        Self {
+            oprs: AsmOperandComponent::new(vec![], vec![op1, op2]),
+        }
+    }
+}
 /**
 * 1. fadd - vadd.f32 Fd, Fn, Fm 不支持立即数
 * 2. fsub - vsub.f32同上
@@ -182,402 +723,90 @@ public class CMPInst extends AsmInst implements ImmOpInst {
 * 4. fdiv - vdiv.f32
 * 5. 浮点数好像不支持取模
  */
-public class FBinOpInst extends AsmInst {
-    public BinaryOp op;
-
-    public FBinOpInst(AsmBlock p, BinaryOp op, AsmOperand to, AsmOperand op1, AsmOperand op2) {
-        parent = p;
-        this.op = op;
-        assert to.isFloat && op1.isFloat && op2.isFloat;
-        defs.add(to);
-        uses.add(op1);
-        uses.add(op2);
-    }
-
-    public static String opToString(BinaryOp op) {
-        switch(op) {
-            case ADD: return "VADD.F32";
-            case DIV: return "VDIV.F32";
-            case MUL: return "VMUL.F32";
-            case SUB: return "VSUB.F32";
-            default: return null;
+#[derive(Debug, PartialEq, Clone)]
+pub struct FBinOpInst {
+    pub op: BinaryOp,
+    pub oprs: AsmOperandComponent,
+}
+impl_asm_inst_trait!(FBinOpInst);
+impl FBinOpInst {
+    pub fn new(op: BinaryOp, to: AsmOperand, op1: AsmOperand, op2: AsmOperand) -> Self {
+        Self {
+            op,
+            oprs: AsmOperandComponent::new(vec![to], vec![op1, op2]),
         }
     }
-
-    @Override
-    public String toString() {
-        return String.format("%s\t%s, %s, %s", opToString(op), defs.get(0).toString(),
-                                    uses.get(0).toString(), uses.get(1).toString());
-    }
 }
-
-
-public class FCMPInst extends AsmInst {
-    public FCMPInst(AsmBlock p, AsmOperand op1, AsmOperand op2) {
-        parent = p;
-        uses.add(op1);
-        uses.add(op2);
-    }
-
-    @Override
-    public String toString() {
-        return String.format("VCMP.F32\t%s, %s",
-                    uses.get(0).toString(), uses.get(1).toString());
-    }
-}
-
-
-/**
- * 同时表示
- * 1. 普通的基于寄存器的加载
- * 3. 基于sp/bp带偏移的加载
- * dest必须是寄存器，addr可以是寄存器，StackOperand，Imm立即数。
- */
-public class LoadInst extends AsmInst implements StackOpInst {
-    public LoadInst(AsmBlock p, AsmOperand dest, AsmOperand addr) {
-        parent = p;
-        defs.add(dest);
-        uses.add(addr);
-    }
-
-    @Override
-    public String toString() {
-        return String.format("LDR\t%s, [%s]",
-            defs.get(0).toString(), uses.get(0).toString());
-    }
-
-    public boolean isImmFit(StackOperand so) {
-        return LoadInst.isImmFitStatic(so);
-    }
-
-    // `LDR/STR Rd, [Rn {, #<offset>}]` -4095 to +4095
-    public static boolean isImmFitStatic(StackOperand so) {
-        // 范围暂时放窄一些，等测例都过了再改回来
-        if (so.offset <= 4070 && so.offset >= -4070) {
-            return true;
-        }
-        return false;
-    }
-}
-
-
-public class MovInst extends AsmInst {
-    public enum Ty {
-        REG,
-        MOVW,
-        MOVT;
-
-        @Override
-        public String toString() {
-            switch (this) {
-                case MOVT: return "MOVT";
-                case MOVW: return "MOVW";
-                case REG: return "MOV";
-            }
-            return null;
-        }
-    }
-    public Ty ty;
-    public Cond cond;
-
-    public MovInst(AsmBlock p, Ty ty, AsmOperand to, AsmOperand from) {
-        parent = p;
-        this.ty = ty;
-        defs.add(to);
-        uses.add(from);
-        cond = Cond.AL;
-    }
-
-    public static List<AsmInst> loadImm(AsmBlock p, AsmOperand reg, Imm imm) {
-        var ret = new ArrayList<AsmInst>();
-        if (imm instanceof FloatImm) {
-            var fimm = (FloatImm) imm;
-            assert reg.isFloat == true;
-            // 先借助保留的IP加载进来
-            var tmp = new Reg(Reg.Type.ip);
-            ret.addAll(loadImm(p, tmp, new IntImm(fimm.bitcastInt())));
-            // 从IP移到目标寄存器里。
-            ret.add(new VMovInst(p, VMovInst.Ty.A2S, reg, tmp));
-        } else if (imm instanceof LabelImm || imm instanceof IntImm) { // 简单情况
-            // MOVW会自动清空高16bit，所以立即数小于16bit范围的可以直接MOVW
-            if (imm.highestOneBit() < 65535) {
-                ret.add(new MovInst(p, Ty.MOVW, reg, imm));
-            } else {
-                ret.add(new MovInst(p, Ty.MOVW, reg, imm.getLow16()));
-                ret.add(new MovInst(p, Ty.MOVT, reg, imm.getHigh16()));
-            }
-        } else {throw new UnsupportedOperationException();}
-        return ret;
-    }
-
-    @Override
-    public String toString() {
-        return ty.toString()+cond.toString()+"\t"+defs.get(0).toString()+", "+uses.get(0).toString();
-    }
-}
-
-
-public class Prologue extends ConstrainRegInst {
-    // 寄存器分配的起始约束 - 参数
-
-    // 所在函数
-    AsmFunc func;
-
-    public Prologue(AsmBlock p, AsmFunc f) {
-        func = f;
-        parent = p;
-    }
-
-    public static String format = "push\t{fp, lr}\n"
-                                + "\tmov\tfp, sp\n";
-    @Override
-    public String toString() {
-        var sb = new StringBuilder(format);
-        var stackSize = Math.toIntExact(func.sm.totalStackSize());
-        var subs = Generator.expandBinOpIP(new BinOpInst(null, BinaryOp.SUB, new Reg(Reg.Type.sp), new Reg(Reg.Type.sp), new IntImm(stackSize)));
-        subs.forEach(inst -> {sb.append("\t").append(inst.toString()).append("\n");});
-        return sb.toString();
-    }
-
-    @Override
-    public void setConstraint(VirtReg reg, Reg phyReg) {
-        assert !reg.isFloat;
-        outConstraints.put(phyReg, reg);
-    }
-
-    @Override
-    public void setConstraint(VirtReg reg, VfpReg phyReg) {
-        assert reg.isFloat;
-        outConstraints.put(phyReg, reg);
-    }
-}
-
-// 代表了需要插入epilogue和返回的抽象指令
-// use可能为空，代表空的return，也可能返回一个值
-public class RetInst extends ConstrainRegInst {
-    // 寄存器分配的约束-返回值
-
-    // 所在函数
-    AsmFunc func;
-
-    public RetInst(AsmBlock p, AsmFunc f) {
-        func = f;
-        parent = p;
-    }
-
-    public static String format = "mov\tsp, fp\t@ %s\n"
-                                    + "\tpop\t{fp, lr}\n"
-                                    + "\tbx\tlr";
-
-    @Override
-    public String toString() {
-        String comment;
-        if (uses.size() > 0) {
-            comment = "ret " + uses.get(0).toString();
-        } else {
-            comment = "ret void";
-        }
-        return String.format(format, comment);
-    }
-
-    @Override
-    public void setConstraint(VirtReg reg, Reg phyReg) {
-        assert !reg.isFloat;
-        inConstraints.put(phyReg, reg);
-    }
-
-    @Override
-    public void setConstraint(VirtReg reg, VfpReg phyReg) {
-        assert reg.isFloat;
-        inConstraints.put(phyReg, reg);
-    }
-}
-
-public class StoreInst extends AsmInst implements StackOpInst {
-    public StoreInst(AsmBlock p, AsmOperand val, AsmOperand addr) {
-        parent = p;
-        uses.add(val);
-        uses.add(addr);
-    }
-
-    @Override
-    public String toString() {
-        return String.format("STR\t%s, [%s]",
-            uses.get(0).toString(), uses.get(1).toString());
-    }
-
-    public boolean isImmFit(StackOperand so) {
-        return LoadInst.isImmFitStatic(so);
-    }
-}
-
-/**
- * label的名字按照AsmFunc.tailCallLabel的格式设置
- */
-public class TailCallInst extends CallInst {
-
-    public TailCallInst(AsmBlock p, LabelImm f, CallingConvention cc) {
-        super(p, f, cc);
-    }
-
-    @Override
-    public String toString() {
-        return String.format("B\t%s", target.label);
-    }
-}
-
-public class VCVTInst extends AsmInst {
-    // 根据quick reference card上的条目分类
-    public enum Ty {
-        F2I,
-        I2F,
-        F2D;
-
-        @Override
-        public String toString() {
-            switch (this) {
-                case F2I: return "VCVT.S32.F32";
-                case I2F: return "VCVT.F32.S32";
-                case F2D: return "vcvt.f64.f32";
-            }
-            return null;
-        }
-    }
-    Ty ty;
-
-    public VCVTInst(AsmBlock p, Ty ty, AsmOperand to, AsmOperand from) {
-        parent = p;
-        this.ty = ty;
-        defs.add(to);
-        uses.add(from);
-    }
-
-    @Override
-    public String toString() {
-        return ty.toString()+"\t"+defs.get(0).toString()+", "+uses.get(0).toString();
-    }
-}
-// VSTR{C} Fd, [Rn{, #<immed>}] imm范围0-1020
-public class VLDRInst extends AsmInst implements StackOpInst {
-    public VLDRInst(AsmBlock p, AsmOperand dest, AsmOperand addr) {
-        parent = p;
-        defs.add(dest);
-        uses.add(addr);
-    }
-
-    @Override
-    public String toString() {
-        return String.format("VLDR\t%s, [%s]",
-            defs.get(0).toString(), uses.get(0).toString());
-    }
-
-    @Override
-    public boolean isImmFit(StackOperand so) {
-        return VLDRInst.isImmFitStatic(so);
-    }
-
-    // `VSTR/VLDR Fd, [Rn{, #<immed>}]`  Immediate range 0-1020, multiple of 4.
-    public static boolean isImmFitStatic(StackOperand so) {
-        assert (so.offset % 4) == 0;
-        if (so.offset >= 0 && so.offset <= 1020) {
-            return true;
-        }
-        return false;
-    }
-}
-// 未来需要兼顾移动两个寄存器的情况
-public class VMovInst extends AsmInst {
-    // 根据quick reference card上的条目分类
-    public enum Ty {
-        CPY,
-        A2S,
-        S2A;
-
-        @Override
-        public String toString() {
-            switch (this) {
-                case CPY:
-                case A2S:
-                case S2A: return "VMOV";
-            }
-            return null;
-        }
-    }
-    Ty ty;
-    // public Cond cond; // TODO FPSCR的cond是否需要单独的类
-
-    public VMovInst(AsmBlock p, Ty ty, AsmOperand to, AsmOperand from) {
-        parent = p;
-        this.ty = ty;
-        defs.add(to);
-        uses.add(from);
-        // cond = Cond.AL;
-    }
-
-    @Override
-    public String toString() {
-        var sj = new StringJoiner(", ");
-        defs.forEach(d -> sj.add(d.toString()));
-        uses.forEach(u -> sj.add(u.toString()));
-        return ty.toString()+"\t"+sj.toString();
-    }
-}
-public class VMRS extends AsmInst {
-
-    public VMRS(AsmBlock p) {
-        parent = p;
-    }
-
-    @Override
-    public String toString() {
-        return "vmrs\tAPSR_nzcv, FPSCR";
-    }
-}
-public class VSTRInst extends AsmInst implements StackOpInst {
-    public VSTRInst(AsmBlock p, AsmOperand val, AsmOperand addr) {
-        parent = p;
-        uses.add(val);
-        uses.add(addr);
-    }
-
-    @Override
-    public String toString() {
-        return String.format("VSTR\t%s, [%s]",
-            uses.get(0).toString(), uses.get(1).toString());
-    }
-
-    @Override
-    public boolean isImmFit(StackOperand so) {
-        return VLDRInst.isImmFitStatic(so);
-    }
-}
-
-*/
-
-use core::fmt;
-
-use crate::mc::{AsmOperand, AsmValueId, CallConv, Imm, ImmTrait, RegConstraintMap, StackOperand};
 
 #[derive(Debug, PartialEq, Clone)]
-
-pub enum AsmInst {
-    Call(CallInst),
+pub struct CMPInst {
+    pub oprs: AsmOperandComponent,
 }
+impl_asm_inst_trait!(CMPInst);
+impl CMPInst {
+    pub fn new(op1: AsmOperand, op2: AsmOperand) -> Self {
+        Self {
+            oprs: AsmOperandComponent::new(vec![], vec![op1, op2]),
+        }
+    }
+}
+
+pub trait StackOpInstTrait {
+    fn is_imm_fit(&self, so: &StackOperand) -> bool;
+}
+
+impl AsmInst {
+    pub fn is_call(&self) -> bool {
+        matches!(self, AsmInst::Call(_))
+    }
+
+    pub fn is_ldr(&self) -> bool {
+        matches!(self, AsmInst::LDR(_))
+    }
+
+    pub fn is_vldr(&self) -> bool {
+        matches!(self, AsmInst::VLDR(_))
+    }
+
+    pub fn is_binop(&self) -> bool {
+        matches!(self, AsmInst::BinOp(_))
+    }
+
+    pub fn is_bx(&self) -> bool {
+        matches!(self, AsmInst::BX(_))
+    }
+
+    pub fn is_br(&self) -> bool {
+        matches!(self, AsmInst::Br(_))
+    }
+
+    pub fn is_str(&self) -> bool {
+        matches!(self, AsmInst::STR(_))
+    }
+
+    pub fn is_vstr(&self) -> bool {
+        matches!(self, AsmInst::VSTR(_))
+    }
+
+    pub fn is_stack_op(&self) -> bool {
+        matches!(self, AsmInst::LDR(_) | AsmInst::VLDR(_) | AsmInst::STR(_))
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 
 pub struct CallInst {
     /// jump target
     pub label: AsmValueId,
+    pub cc: CallConv,
     /// used to bind args to calling convention registers
-    pub in_constraints: RegConstraintMap,
-    pub out_constraints: RegConstraintMap,
+    pub constraints: ConstraintsComponent,
 }
+
+impl_asm_inst_trait_no_oprs!(CallInst);
+impl_constraints_trait!(CallInst);
+
 #[derive(Debug, PartialEq, Clone)]
-
-pub struct Prologue {
-    pub out_constraints: RegConstraintMap,
-}
-
 pub enum BinaryOp {
     Add,
     Sub,
@@ -596,18 +825,71 @@ pub enum BinaryOp {
 
 /// https://developer.arm.com/documentation/dui0473/m/vfp-instructions/vstr--floating-point-
 /// VSTR{C} Fd, [Rn{, #<immed>}] imm范围0-1020
+#[derive(Debug, PartialEq, Clone)]
 
 pub struct VLDRInst {
-    pub dest: AsmOperand,
-    pub addr: AsmOperand,
+    pub oprs: AsmOperandComponent,
 }
-
+impl_asm_inst_trait!(VLDRInst);
 impl VLDRInst {
-    fn new(dest: AsmOperand, addr: AsmOperand) -> VLDRInst {
-        VLDRInst { dest, addr }
+    pub fn new(dest: AsmOperand, addr: AsmOperand) -> VLDRInst {
+        let oprs = AsmOperandComponent::new(vec![dest], vec![addr]);
+        VLDRInst { oprs }
     }
 
-    fn is_imm_fit(so: &StackOperand) -> bool {
+    pub fn is_imm_fit(so: &StackOperand) -> bool {
+        assert!(so.offset % 4 == 0);
+        so.offset >= 0 && so.offset <= 1020
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+
+pub struct LDRInst {
+    pub oprs: AsmOperandComponent,
+}
+impl_asm_inst_trait!(LDRInst);
+impl LDRInst {
+    pub fn new(dest: AsmOperand, addr: AsmOperand) -> LDRInst {
+        let oprs = AsmOperandComponent::new(vec![dest], vec![addr]);
+        LDRInst { oprs }
+    }
+
+    pub fn is_imm_fit(so: &StackOperand) -> bool {
+        assert!(so.offset % 4 == 0);
+        so.offset >= -4070 && so.offset <= 4070
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct STRInst {
+    pub oprs: AsmOperandComponent,
+}
+impl_asm_inst_trait!(STRInst);
+impl STRInst {
+    pub fn new(val: AsmOperand, addr: AsmOperand) -> STRInst {
+        let oprs = AsmOperandComponent::new(vec![], vec![val, addr]);
+        STRInst { oprs }
+    }
+
+    pub fn is_imm_fit(so: &StackOperand) -> bool {
+        assert!(so.offset % 4 == 0);
+        so.offset >= -4070 && so.offset <= 4070
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct VSTRInst {
+    pub oprs: AsmOperandComponent,
+}
+impl_asm_inst_trait!(VSTRInst);
+impl VSTRInst {
+    pub fn new(val: AsmOperand, addr: AsmOperand) -> VSTRInst {
+        let oprs = AsmOperandComponent::new(vec![], vec![val, addr]);
+        VSTRInst { oprs }
+    }
+
+    pub fn is_imm_fit(so: &StackOperand) -> bool {
         assert!(so.offset % 4 == 0);
         so.offset >= 0 && so.offset <= 1020
     }
@@ -622,24 +904,19 @@ impl VLDRInst {
  * 4. SDIV Rd, Rn, Rm 有符号除法，同上
  * 5. 取模：不支持，在IR那边转换为调用相关eabi函数
  */
-struct BinOpInst {
-    op: BinaryOp,
-    to: AsmOperand,
-    op1: AsmOperand,
-    op2: AsmOperand,
+#[derive(Debug, PartialEq, Clone)]
+
+pub struct BinOpInst {
+    pub op: BinaryOp,
+    pub oprs: AsmOperandComponent,
 }
 
-pub struct Operand2;
-// Flexible Operand 2 目前仅当作8bit常量使用
-impl Operand2 {
-    pub fn is_imm_fit(m: &Imm) -> bool {
-        m.highest_one_bit() < 255
-    }
-}
+impl_asm_inst_trait!(BinOpInst);
 
 impl BinOpInst {
-    fn new(op: BinaryOp, to: AsmOperand, op1: AsmOperand, op2: AsmOperand) -> BinOpInst {
-        BinOpInst { op, to, op1, op2 }
+    pub fn new(op: BinaryOp, to: AsmOperand, op1: AsmOperand, op2: AsmOperand) -> BinOpInst {
+        let oprs = AsmOperandComponent::new(vec![to], vec![op1, op2]);
+        BinOpInst { op, oprs }
     }
 
     fn op_to_string(op: &BinaryOp) -> &'static str {
@@ -660,15 +937,33 @@ impl BinOpInst {
     }
 }
 
-struct BrInst {
+pub struct Operand2;
+// Flexible Operand 2 目前仅当作8bit常量使用
+impl Operand2 {
+    pub fn is_imm_fit(m: &Imm) -> bool {
+        m.highest_one_bit() < 255
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct BrInst {
     cond: Cond,
     target: AsmValueId, // AsmBlock
 }
 
-struct BrInstBuilder {
+impl_asm_inst_trait_no_oprs!(BrInst);
+
+impl BrInst {
+    pub fn new(cond: Cond, target: AsmValueId) -> BrInst {
+        BrInst { cond, target }
+    }
+}
+
+pub struct BrInstBuilder {
     inst: BrInst,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum Cond {
     AL,
     EQ,
@@ -707,6 +1002,17 @@ impl fmt::Display for Cond {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct BXInst {
-    op: AsmOperand,
+    pub oprs: AsmOperandComponent,
+}
+
+impl_asm_inst_trait!(BXInst);
+
+impl BXInst {
+    pub fn new(opr: AsmOperand) -> BXInst {
+        BXInst {
+            oprs: AsmOperandComponent::new(vec![], vec![opr]),
+        }
+    }
 }

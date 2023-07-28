@@ -4,7 +4,7 @@ use crate::{
     ast::{Param, Type},
     ir::*,
     mc::*,
-    mc_inst::VLDRInst,
+    mc_inst::{self, AsmInst, AsmInstTrait, BinOpInst, PrologueInst, StackOpInstTrait, VLDRInst},
 };
 
 pub fn build(module: &mut Module) -> AsmModule {
@@ -26,6 +26,8 @@ struct McBuilder<'a> {
     gv_map: HashMap<ValueId, AsmValueId>,
     // ir value -> vreg
     vreg_map: HashMap<ValueId, AsmOperand>,
+
+    vreg_idx: i32,
 }
 
 impl Into<AsmGlobalVariable> for GlobalVariableValue {
@@ -49,10 +51,10 @@ impl Into<AsmBlock> for BasicBlockValue {
 impl From<ConstValue> for Imm {
     fn from(value: ConstValue) -> Self {
         match value {
-            ConstValue::Int(i) => Imm::IntImm(IntImm {
+            ConstValue::Int(i) => Imm::Int(IntImm {
                 value: i.value as u32,
             }),
-            ConstValue::Float(f) => Imm::FloatImm(FloatImm {
+            ConstValue::Float(f) => Imm::Float(FloatImm {
                 value: f.value as f32,
                 is_float: true,
             }),
@@ -96,6 +98,7 @@ impl McBuilder<'_> {
             func_map: HashMap::new(),
             gv_map: HashMap::new(),
             vreg_map: HashMap::new(),
+            vreg_idx: 0,
         }
     }
 
@@ -134,7 +137,11 @@ impl McBuilder<'_> {
             let asm_block = AsmBlock::from(block.clone().into());
             let asm_block_id = self.module.alloc_value(AsmValue::Block(asm_block));
             self.module.cur_func_mut().bbs.push(asm_block_id);
+
+            self.bb_map.insert(block_id.clone(), asm_block_id.clone());
         }
+
+        let prologue = PrologueInst::new(asm_func_id.clone());
         // TODO: prologue
         // TODO: handle callling convention
     }
@@ -152,7 +159,7 @@ impl McBuilder<'_> {
             .map(|v_id| {
                 let param_val = FunctionValue::resolve_param(*v_id, self.ir_module);
                 ParamInfo {
-                    base_type: AsmTypeTag::from(*param_val.ty.base_type()),
+                    base_type: AsmTypeTag::from(param_val.ty.base_type().clone()),
                     is_pointer: param_val.ty.is_pointer(false),
                 }
             })
@@ -162,7 +169,7 @@ impl McBuilder<'_> {
             // ret = BaseCallCVfpCallConv::new().resolve(&params, f.ret_type);
             unimplemented!();
         } else {
-            ret = VfpCallConv::new().resolve(&params, AsmTypeTag::from(f.ret_ty));
+            ret = VfpCallConv::new().resolve(&params, AsmTypeTag::from(f.ret_ty.clone()));
         }
 
         self.vfp_callconv_map.insert(*func_id, ret.clone());
@@ -201,56 +208,369 @@ impl McBuilder<'_> {
         // 如果是ConstantValue则需要转为Imm
         if let Value::Const(cv) = v {
             assert!(!cv.is_array());
-            return AsmOperand::Imm(Imm::from(*cv));
+            return AsmOperand::Imm(Imm::from(cv.clone()));
         }
 
         // IR那边GlobalVariable直接引用也代表地址，所以不用Load
         if let Value::GlobalVariable(gv) = v {
-            return self.gv_map.get(&valud_id).unwrap().imm.clone();
+            let asmgv_id = self.gv_map.get(&valud_id).unwrap();
+            let asmgv = self.module.get_global_variable(*asmgv_id);
+            return AsmOperand::Imm(Imm::Label(asmgv.imm.clone()));
         }
 
-        let mut ret = VirtReg::new(self.vreg_ind, v.type_().is_base_float());
-        if v.type_().is_base_float() {
-            ret.is_float = true;
-        }
-        self.vreg_map.insert(v.clone(), ret.clone());
+        let ret = VirtReg {
+            index: self.vreg_idx,
+            is_float: *v.ty().base_type() == crate::ast::BuiltinType::Float.into(),
+        };
+        self.vreg_map.insert(valud_id, ret.clone().into());
 
         // 如果是参数且在内存中，则生成load指令
         // 使用CallCVfpCallConv的解析结果。
         if let Value::VariableValue(pv) = v {
-            let index = ssa_func
+            let arg_idx = ssa_func
                 .params
                 .iter()
                 .position(|arg_id| *arg_id == valud_id)
                 .unwrap();
             let cc = self.get_cc(&ssa_func_id); // 有函数体的必然不是vararg的。
-            let loc = cc.self_arg[index].clone();
+            let loc = cc.self_arg[arg_idx].clone();
             assert!(loc.is_stack_operand()); // 其他的应该在前面就取到了vreg。
-            if let AsmOperand::StackOperand(stack_op) = loc {
+            if let AsmOperand::StackOperand(_) = loc {
                 // 生成Load指令加载内存里的值到虚拟寄存器里。
-                // let load: Box<dyn Inst> = if pv.type_().is_base_float() {
-                //     Box::new(VLDRInst::new(abb.clone(), ret.clone(), loc))
-                // } else {
-                //     Box::new(LoadInst::new(abb.clone(), ret.clone(), loc))
-                // };
-
-                // if before_jump {
-                //     abb.add_all_before_jump(expand_stack_operand_load_store(load));
-                // } else {
-                //     abb.insts.extend(expand_stack_operand_load_store(load));
-                // }
+                let load = if *pv.ty.base_type() == Type::Builtin(crate::ast::BuiltinType::Float) {
+                    self.module
+                        .alloc_value(AsmValue::Inst(mc_inst::AsmInst::VLDR(
+                            mc_inst::VLDRInst::new(ret.clone().into(), loc),
+                        )))
+                } else {
+                    self.module
+                        .alloc_value(AsmValue::Inst(mc_inst::AsmInst::LDR(
+                            mc_inst::LDRInst::new(ret.clone().into(), loc),
+                        )))
+                };
+                if before_jump {
+                    let new_insts = self.expand_stack_operand_load_store(load);
+                    self.module.add_all_before_branch(asm_bb_id, new_insts);
+                } else {
+                    let new_insts = self.expand_stack_operand_load_store(load);
+                    let abb = self.module.get_bb_mut(asm_bb_id);
+                    abb.insts.extend(new_insts);
+                }
             }
         }
 
         // 增加注释便于Debug
-        ret.comment = v.name().to_string();
+        // ret.comment = v.name().to_string();
         AsmOperand::VirtReg(ret)
     }
+    // Check whether the second argument StackOperand meets the requirements, if not, expand it into multiple instructions
+    // Load dst, addr
+    // Store val, addr
+    fn expand_stack_operand_load_store(&mut self, inst_id: AsmValueId) -> Vec<AsmValueId> {
+        let mut ret = Vec::new();
+        let mut newuse = Vec::new();
 
+        let mut inst = self.module.get_inst(inst_id).clone();
+        assert!(inst.is_ldr() || inst.is_str() || inst.is_vstr() || inst.is_vldr());
+
+        if inst.is_str() || inst.is_vstr() {
+            newuse.push(inst.get_uses()[0].clone());
+            self.expand_stack_operand(inst_id, &inst.get_uses()[1], &mut newuse, &mut ret);
+        } else if inst.is_ldr() || inst.is_vldr() {
+            self.expand_stack_operand(inst_id, &inst.get_uses()[0], &mut newuse, &mut ret);
+        }
+        inst.set_uses(newuse);
+        self.module.set_inst(inst_id, inst);
+        ret.push(inst_id);
+        ret
+    }
+
+    fn expand_cmp_imm(&mut self, inst_id: AsmValueId) -> Vec<AsmValueId> {
+        let mut inst = self.module.get_inst_mut(inst_id).clone();
+        let mut ret = Vec::new();
+        let mut newuse = Vec::new();
+        self.expand_imm(&inst.get_uses()[0], &mut newuse, &mut ret);
+        self.expand_operand2(&inst.get_uses()[1], &mut newuse, &mut ret);
+        inst.set_uses(newuse);
+        self.module.set_inst(inst_id, inst);
+        ret.push(inst_id);
+        ret
+    }
+
+    fn expand_inst_imm(&mut self, inst_id: AsmValueId) -> Vec<AsmValueId> {
+        let mut inst = self.module.get_inst_mut(inst_id).clone();
+        let mut ret = Vec::new();
+        let mut newuse = Vec::new();
+        for op in &inst.get_uses() {
+            self.expand_imm(op, &mut newuse, &mut ret);
+        }
+        inst.set_uses(newuse);
+        self.module.set_inst(inst_id, inst);
+        ret.push(inst_id);
+        ret
+    }
+
+    fn expand_imm(
+        &mut self,
+        op: &AsmOperand,
+        new_ops: &mut Vec<AsmOperand>,
+        insts: &mut Vec<AsmValueId>,
+    ) {
+        if let AsmOperand::Imm(imm) = op {
+            let tmp = self.get_vreg(op.is_float());
+            insts.extend(self.module.load_imm(tmp.clone().into(), &imm));
+            new_ops.push(tmp.into());
+        } else {
+            new_ops.push((*op).clone());
+        }
+    }
+
+    fn expand_stack_operand(
+        &mut self,
+        inst_id: AsmValueId,
+        op: &AsmOperand,
+        new_ops: &mut Vec<AsmOperand>,
+        insts: &mut Vec<AsmValueId>,
+    ) {
+        if let AsmOperand::StackOperand(so) = op {
+            let inst = self.module.get_inst(inst_id);
+            if inst.is_imm_fit(so) {
+                new_ops.push(AsmOperand::StackOperand(so.clone()));
+                return;
+            }
+            let tmp = AsmOperand::VirtReg(self.get_vreg(false));
+            let tmp2 = AsmOperand::VirtReg(self.get_vreg(false));
+            assert!(so.ty != StackOperandType::Spill);
+            let id = match so.ty {
+                StackOperandType::SelfArg => {
+                    insts.extend(
+                        self.module
+                            .load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                    );
+                    let binop = mc_inst::BinOpInst::new(
+                        mc_inst::BinaryOp::Add,
+                        tmp2.clone(),
+                        IntReg::new(RegType::Fp).into(),
+                        tmp,
+                    );
+                    let new_inst = AsmValue::Inst(mc_inst::AsmInst::BinOp(binop));
+                    self.module.alloc_value(new_inst)
+                }
+                StackOperandType::Local => {
+                    insts.extend(
+                        self.module
+                            .load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                    );
+                    let binop = mc_inst::BinOpInst::new(
+                        mc_inst::BinaryOp::Sub,
+                        tmp2.clone(),
+                        IntReg::new(RegType::Fp).into(),
+                        tmp,
+                    );
+                    let new_inst = AsmValue::Inst(mc_inst::AsmInst::BinOp(binop));
+                    self.module.alloc_value(new_inst)
+                }
+                StackOperandType::CallParam => {
+                    insts.extend(
+                        self.module
+                            .load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                    );
+                    let binop = mc_inst::BinOpInst::new(
+                        mc_inst::BinaryOp::Add,
+                        tmp2.clone(),
+                        IntReg::new(RegType::Sp).into(),
+                        tmp,
+                    );
+                    let new_inst = AsmValue::Inst(mc_inst::AsmInst::BinOp(binop));
+                    self.module.alloc_value(new_inst)
+                }
+                _ => panic!("Unsupported operation"),
+            };
+            insts.push(id);
+            new_ops.push(tmp2);
+        } else {
+            new_ops.push((*op).clone());
+        }
+    }
+    // Flexible Operand 2 can be Imm8m
+    fn expand_operand2(
+        &mut self,
+        op: &AsmOperand,
+        new_ops: &mut Vec<AsmOperand>,
+        insts: &mut Vec<AsmValueId>,
+    ) {
+        match op {
+            AsmOperand::Imm(immop) => {
+                if immop.highest_one_bit() < 255 {
+                    new_ops.push(AsmOperand::Imm(immop.clone()));
+                    return;
+                }
+                let tmp = AsmOperand::VirtReg(self.get_vreg(false));
+                insts.extend(self.module.load_imm(tmp.clone(), immop));
+                new_ops.push(tmp);
+            }
+            _ => {
+                new_ops.push((*op).clone());
+            }
+        }
+    }
+
+    pub fn expand_bin_op(&mut self, bin_id: AsmValueId) -> Vec<AsmValueId> {
+        let mut bin_inst = self
+            .module
+            .get_inst_mut(bin_id)
+            .as_bin_op()
+            .unwrap()
+            .clone();
+        let mut ret = Vec::new();
+        let mut op1 = bin_inst.get_uses()[0].clone();
+        let mut op2 = bin_inst.get_uses()[1].clone();
+        if let AsmOperand::Imm(imm) = op1.clone() {
+            let tmp = AsmOperand::VirtReg(self.get_vreg(op1.is_float()));
+            ret.extend(self.module.load_imm(tmp.clone(), &imm));
+            op1 = tmp;
+        }
+        match op2.clone() {
+            AsmOperand::Imm(imm) => {
+                if !matches!(bin_inst.op, mc_inst::BinaryOp::Add | mc_inst::BinaryOp::Sub)
+                    || imm.highest_one_bit() >= 255
+                {
+                    let tmp = AsmOperand::VirtReg(self.get_vreg(op2.is_float()));
+                    ret.extend(self.module.load_imm(tmp.clone(), &imm));
+                    op2 = tmp;
+                }
+            }
+            _ => (),
+        }
+        bin_inst.set_uses(vec![op1, op2]);
+        self.module.set_inst(bin_id, bin_inst.into());
+        ret.push(bin_id);
+        ret
+    }
+
+    // 检查第二个参数StackOperand是否满足要求，不满足则展开为多个指令
+    // 给寄存器分配使用的公开版本
+    pub fn expand_stack_operand_load_store_ip(&mut self, inst_id: AsmValueId) -> Vec<AsmValueId> {
+        let inst = self.module.get_inst_mut(inst_id).clone();
+        let mut ret = Vec::<AsmValueId>::new();
+        let mut newuse = Vec::new();
+        assert!(matches!(
+            inst,
+            AsmInst::LDR(_) | AsmInst::STR(_) | AsmInst::VSTR(_) | AsmInst::VLDR(_)
+        ));
+        match inst {
+            AsmInst::STR(_) | AsmInst::VSTR(_) => {
+                newuse.push(inst.get_uses()[0].clone());
+                self.expand_stack_operand_ip(
+                    inst_id,
+                    &inst.get_uses()[1],
+                    &inst.get_uses()[0],
+                    &mut newuse,
+                    &mut ret,
+                );
+            }
+            AsmInst::LDR(_) | AsmInst::VLDR(_) => {
+                self.expand_stack_operand_ip(
+                    inst_id,
+                    &inst.get_uses()[0],
+                    &inst.get_defs()[0],
+                    &mut newuse,
+                    &mut ret,
+                );
+            }
+            _ => (),
+        }
+        // in case of using a old value
+        let mut inst = self.module.get_inst_mut(inst_id).clone();
+        inst.set_uses(newuse);
+        self.module.set_inst(inst_id, inst);
+        ret.push(inst_id);
+        ret
+    }
+
+    pub fn expand_stack_operand_ip(
+        &mut self,
+        inst_id: AsmValueId,
+        op: &AsmOperand,
+        target: &AsmOperand,
+        new_ops: &mut Vec<AsmOperand>,
+        insts: &mut Vec<AsmValueId>,
+    ) {
+        let inst = self.module.get_inst(inst_id).clone();
+        match op {
+            AsmOperand::StackOperand(so) => {
+                if inst.is_imm_fit(so) {
+                    new_ops.push(AsmOperand::StackOperand(so.clone()));
+                    return;
+                }
+                assert!(matches!(
+                    target,
+                    AsmOperand::IntReg(_) | AsmOperand::VfpReg(_)
+                ));
+                let tmp = AsmOperand::IntReg(IntReg::new(RegType::Ip));
+                let tmp2 = AsmOperand::IntReg(IntReg::new(RegType::Ip));
+                match so.ty {
+                    StackOperandType::SelfArg => {
+                        insts.extend(
+                            self.module
+                                .load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                        );
+                        let inst = mc_inst::BinOpInst::new(
+                            mc_inst::BinaryOp::Add,
+                            tmp2.clone(),
+                            AsmOperand::IntReg(IntReg::new(RegType::Fp)),
+                            tmp.clone(),
+                        );
+                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
+                        let id = self.module.alloc_value(inst);
+
+                        insts.push(id);
+                    }
+                    StackOperandType::Local | StackOperandType::Spill => {
+                        insts.extend(
+                            self.module
+                                .load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                        );
+                        let inst = mc_inst::BinOpInst::new(
+                            mc_inst::BinaryOp::Sub,
+                            tmp2.clone(),
+                            AsmOperand::IntReg(IntReg::new(RegType::Fp)),
+                            tmp.clone(),
+                        );
+                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
+                        let id = self.module.alloc_value(inst);
+
+                        insts.push(id);
+                    }
+                    StackOperandType::CallParam => {
+                        insts.extend(
+                            self.module
+                                .load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                        );
+                        let inst = mc_inst::BinOpInst::new(
+                            mc_inst::BinaryOp::Add,
+                            tmp2.clone(),
+                            AsmOperand::IntReg(IntReg::new(RegType::Sp)),
+                            tmp.clone(),
+                        );
+                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
+                        let id = self.module.alloc_value(inst);
+
+                        insts.push(id);
+                    }
+                    _ => panic!("Unsupported operation"),
+                }
+                new_ops.push(tmp2);
+            }
+            _ => {
+                new_ops.push((*op).clone());
+            }
+        }
+    }
     // 使用临时寄存器的场景
     fn get_vreg(&mut self, is_float: bool) -> VirtReg {
-        let ret = VirtReg::new(self.vreg_ind, is_float);
-        self.vreg_ind += 1;
+        let ret = VirtReg::new(self.vreg_idx, is_float);
+        self.vreg_idx += 1;
         ret
     }
     // fn build_basic_blocks(&mut self, blocks: &Vec<BasicBlock>) -> Vec<asmBasicBlock> {
