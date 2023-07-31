@@ -119,6 +119,21 @@ impl Module {
         preds
     }
 
+    pub fn get_phis(&self, bb_id: ValueId) -> Vec<ValueId> {
+        let bb = self.get_bb(bb_id);
+        let mut phis = vec![];
+        for inst_id in &bb.insts {
+            let inst = self.get_inst(*inst_id);
+            match inst {
+                InstValue::Phi(phi) => {
+                    phis.push(*inst_id);
+                }
+                _ => {}
+            }
+        }
+        phis
+    }
+
     pub fn get_func_mut(&mut self, func_id: ValueId) -> &mut FunctionValue {
         match &mut self.values[func_id] {
             Value::Function(func) => func,
@@ -242,6 +257,18 @@ impl Module {
                 format!("[{}] var: {:?}", value_id.index(), var)
             }
         }
+    }
+
+    pub fn bb_has_phi(&self, bb_id: ValueId) -> bool {
+        let bb = self.get_bb(bb_id);
+        for inst_id in bb.insts.iter() {
+            let inst = self.get_inst(*inst_id);
+            match inst {
+                InstValue::Phi(_) => return true,
+                _ => {}
+            }
+        }
+        false
     }
 
     pub fn inspect_value_users(&self, value_id: ValueId) -> String {
@@ -461,6 +488,7 @@ impl Module {
             ty: func_value.ty(),
             func,
             args,
+            must_tail: false,
         };
         let val_id = self.alloc_value(call_inst.into());
 
@@ -668,6 +696,13 @@ impl Value {
     pub fn as_global_variable(&self) -> Option<&GlobalVariableValue> {
         match self {
             Value::GlobalVariable(gv) => Some(gv),
+            _ => None,
+        }
+    }
+
+    pub fn as_variable(&self) -> Option<&VariableValue> {
+        match self {
+            Value::VariableValue(v) => Some(v),
             _ => None,
         }
     }
@@ -998,6 +1033,15 @@ impl InstValue {
         }
     }
 
+    pub fn is_term(&self) -> bool {
+        match self {
+            InstValue::Branch(_) => true,
+            InstValue::Jump(_) => true,
+            InstValue::Return(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn has_output(&self) -> bool {
         match self {
             InstValue::InfixOp(_) => true,
@@ -1182,6 +1226,7 @@ pub struct CallInst {
     pub ty: Type,
     pub func: ValueId,
     pub args: Vec<ValueId>,
+    pub must_tail: bool,
 }
 
 impl Into<Value> for CallInst {

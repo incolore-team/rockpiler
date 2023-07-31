@@ -7,7 +7,7 @@ pub enum AsmValue {
 
 pub type AsmValueId = id_arena::Id<AsmValue>;
 /// VirtReg -> PhyReg (General or VFP)
-pub type RegConstraintMap = std::collections::HashMap<AsmValueId, AsmOperand>;
+pub type RegConstraintMap = std::collections::HashMap<VirtReg, AsmOperand>;
 
 pub struct AsmModule {
     values: id_arena::Arena<AsmValue>,
@@ -118,6 +118,22 @@ impl AsmModule {
         }
     }
 
+    pub fn get_func(&self, id: AsmValueId) -> &AsmFunction {
+        if let AsmValue::Function(func) = self.values.get(id).unwrap() {
+            func
+        } else {
+            panic!("value is not a function");
+        }
+    }
+
+    pub fn get_func_mut(&mut self, id: AsmValueId) -> &mut AsmFunction {
+        if let AsmValue::Function(func) = self.values.get_mut(id).unwrap() {
+            func
+        } else {
+            panic!("value is not a function");
+        }
+    }
+
     pub fn load_imm(&mut self, reg: AsmOperand, imm: &Imm) -> Vec<AsmValueId> {
         let mut ret = Vec::new();
         if let Imm::Float(fimm) = imm {
@@ -130,18 +146,19 @@ impl AsmModule {
             if imm.highest_one_bit() < 65535 {
                 // ret.push(MovInst::new(MovType::Movw, reg.clone(), imm.clone().into()).into());
                 let inst: AsmInst =
-                    MovInst::new(MovType::Movw, reg.clone(), imm.clone().into()).into();
+                    MovInst::new(MovType::Movw, reg.clone(), imm.clone().into(), None).into();
                 let inst_id = self.values.alloc(AsmValue::Inst(inst));
                 ret.push(inst_id);
             } else {
                 // ret.push(MovInst::new(MovType::Movw, reg.clone(), imm.lowest_word().into()).into());
                 let inst: AsmInst =
-                    MovInst::new(MovType::Movw, reg.clone(), imm.lowest_word().into()).into();
+                    MovInst::new(MovType::Movw, reg.clone(), imm.lowest_word().into(), None).into();
                 let inst_id = self.values.alloc(AsmValue::Inst(inst));
                 ret.push(inst_id);
                 // ret.push(MovInst::new(MovType::Movt, reg.clone(), imm.highest_word().into()).into(),);
                 let inst: AsmInst =
-                    MovInst::new(MovType::Movt, reg.clone(), imm.highest_word().into()).into();
+                    MovInst::new(MovType::Movt, reg.clone(), imm.highest_word().into(), None)
+                        .into();
                 let inst_id = self.values.alloc(AsmValue::Inst(inst));
                 ret.push(inst_id);
             }
@@ -185,7 +202,7 @@ pub struct AsmGlobalVariable {
     pub size: usize,
     pub imm: LabelImm,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum AsmTypeTag {
     VOID,
     BOOL,
@@ -216,10 +233,50 @@ impl AsmTypeTag {
 }
 
 pub struct StackState {
-    pub spill_done: bool,
-    pub spill_size: u32,
-    pub local_size: u32,
-    max_arg_size: u32,
+    pub alloca_finished: bool,
+    pub spill_size: i64,
+    pub local_size: i64,
+    max_arg_size: i64,
+}
+
+impl StackState {
+    pub fn new() -> Self {
+        StackState {
+            alloca_finished: false,
+            local_size: 0,
+            spill_size: 0,
+            max_arg_size: 0,
+        }
+    }
+
+    // Returns offset relative to BP, use as: bp-offset
+    pub fn alloc_local(&mut self, size: i64) -> i64 {
+        if self.alloca_finished {
+            panic!("Cannot alloc alloca space after spill space")
+        } else {
+            self.local_size += size;
+            self.local_size
+        }
+    }
+
+    // Returns offset relative to BP, use as: bp-offset
+    pub fn alloc_spill(&mut self, size: i64) -> i64 {
+        self.alloca_finished = true;
+        self.spill_size += size;
+        self.spill_size + self.local_size
+    }
+
+    pub fn preserve_arg_size(&mut self, size: i64) {
+        if size > self.max_arg_size {
+            self.max_arg_size = size;
+        }
+    }
+
+    pub fn total_stack_size(&self) -> i64 {
+        let ret = self.local_size + self.spill_size + self.max_arg_size;
+        // Round up to the nearest multiple of 8
+        (ret + 7) / 8 * 8
+    }
 }
 
 pub struct AsmBlock {
@@ -247,7 +304,7 @@ impl AsmModule {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 
 pub enum AsmOperand {
     Imm(Imm),
@@ -263,6 +320,48 @@ impl AsmOperand {
         match self {
             AsmOperand::StackOperand(_) => true,
             _ => false,
+        }
+    }
+
+    pub fn as_imm(&self) -> Option<&Imm> {
+        match self {
+            AsmOperand::Imm(imm) => Some(imm),
+            _ => None,
+        }
+    }
+
+    pub fn as_stack_operand(&self) -> Option<&StackOperand> {
+        match self {
+            AsmOperand::StackOperand(operand) => Some(operand),
+            _ => None,
+        }
+    }
+
+    pub fn as_virt_reg(&self) -> Option<&VirtReg> {
+        match self {
+            AsmOperand::VirtReg(reg) => Some(reg),
+            _ => None,
+        }
+    }
+
+    pub fn as_int_reg(&self) -> Option<&IntReg> {
+        match self {
+            AsmOperand::IntReg(reg) => Some(reg),
+            _ => None,
+        }
+    }
+
+    pub fn as_vfp_double_reg(&self) -> Option<&VfpDoubleReg> {
+        match self {
+            AsmOperand::VfpDoubleReg(reg) => Some(reg),
+            _ => None,
+        }
+    }
+
+    pub fn as_vfp_reg(&self) -> Option<&VfpReg> {
+        match self {
+            AsmOperand::VfpReg(reg) => Some(reg),
+            _ => None,
         }
     }
 
@@ -312,7 +411,7 @@ impl From<VfpReg> for AsmOperand {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 
 pub enum Imm {
     Float(FloatImm),
@@ -380,13 +479,13 @@ pub trait ImmTrait {
     fn highest_word(&self) -> Imm;
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct StackOperand {
     pub ty: StackOperandType,
     pub offset: i64,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum StackOperandType {
     Local,
     Spill,
@@ -394,7 +493,7 @@ pub enum StackOperandType {
     SelfArg,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct VirtReg {
     pub index: i32,
     pub is_float: bool,
@@ -415,7 +514,7 @@ impl From<i64> for VirtReg {
         }
     }
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct IntReg {
     pub ty: RegType,
     pub is_float: bool,
@@ -440,7 +539,7 @@ impl From<i64> for IntReg {
     }
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
 pub enum RegType {
     R0,
     R1,
@@ -512,12 +611,18 @@ impl From<i64> for RegType {
         }
     }
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct VfpDoubleReg {
     pub is_float: bool,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+impl default::Default for VfpDoubleReg {
+    fn default() -> Self {
+        Self { is_float: true }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct VfpReg {
     pub index: i64,
     pub use_as_double: bool,
@@ -541,7 +646,7 @@ impl From<i64> for VfpReg {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct FloatImm {
     pub value: f32,
     pub is_float: bool,
@@ -601,9 +706,15 @@ impl ImmTrait for FloatImm {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct IntImm {
     pub value: u32,
+}
+
+impl IntImm {
+    pub fn new(value: u32) -> Self {
+        Self { value }
+    }
 }
 
 impl From<u32> for IntImm {
@@ -654,7 +765,7 @@ impl ImmTrait for IntImm {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct LabelImm {
     pub state: LabelImmState,
     pub label: String,
@@ -709,31 +820,71 @@ impl ImmTrait for LabelImm {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum LabelImmState {
     Label,
     High,
     Low,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum CallConv {
     BaseCallConv(BaseCallConv),
     VfpCallConv(VfpCallConv),
 }
+
+impl CallConv {
+    pub fn add_param(&mut self, param: ParamInfo) {
+        match self {
+            CallConv::BaseCallConv(base_call_conv) => base_call_conv.add_param(param),
+            CallConv::VfpCallConv(vfp_call_conv) => vfp_call_conv.add_param(param),
+        }
+    }
+
+    pub fn get_stack_size(&self) -> u32 {
+        match self {
+            CallConv::BaseCallConv(base_call_conv) => base_call_conv.get_stack_size(),
+            CallConv::VfpCallConv(vfp_call_conv) => vfp_call_conv.get_stack_size(),
+        }
+    }
+
+    pub fn get_ret_reg(&self) -> AsmOperand {
+        match self {
+            CallConv::BaseCallConv(base_call_conv) => base_call_conv.get_ret_reg(),
+            CallConv::VfpCallConv(vfp_call_conv) => vfp_call_conv.get_ret_reg(),
+        }
+    }
+}
+
+impl CallConv {
+    pub fn as_base_call_conv(&self) -> &BaseCallConv {
+        match self {
+            CallConv::BaseCallConv(base_call_conv) => base_call_conv,
+            _ => panic!("not base call conv"),
+        }
+    }
+
+    pub fn as_vfp_call_conv(&self) -> &VfpCallConv {
+        match self {
+            CallConv::VfpCallConv(vfp_call_conv) => vfp_call_conv,
+            _ => panic!("not vfp call conv"),
+        }
+    }
+}
+
 use core::fmt;
 /// ARM ABI calling convention
 /// https://learn.microsoft.com/zh-cn/cpp/build/overview-of-arm-abi-conventions?view=msvc-170
-use std::collections::LinkedList;
+use std::{collections::LinkedList, default};
 
 use crate::mc_inst::{AsmInst, MovInst, MovType, VMovInst, VMovType};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BaseCallConv {
-    call_param: LinkedList<AsmOperand>,
-    ret_reg: AsmOperand,
-    ncrn: i64,
-    nsaa: i64,
+    pub call_params: Vec<AsmOperand>,
+    pub ret_reg: AsmOperand,
+    pub ncrn: i64,
+    pub nsaa: i64,
 }
 
 trait CallConvTrait {
@@ -741,7 +892,7 @@ trait CallConvTrait {
     fn get_ret_reg(&self) -> AsmOperand;
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ParamInfo {
     pub is_pointer: bool,
     pub base_type: AsmTypeTag,
@@ -750,7 +901,7 @@ pub struct ParamInfo {
 impl BaseCallConv {
     pub fn new() -> Self {
         Self {
-            call_param: LinkedList::new(),
+            call_params: LinkedList::new(),
             ret_reg: AsmOperand::IntReg(IntReg {
                 ty: RegType::R0,
                 is_float: false,
@@ -790,7 +941,7 @@ impl BaseCallConv {
                 ty,
                 is_float: false,
             });
-            self.call_param.push_back(ret.clone());
+            self.call_params.push_back(ret.clone());
             self.ncrn += size / 4;
         } else {
             assert_eq!(self.ncrn, 4);
@@ -798,7 +949,7 @@ impl BaseCallConv {
                 ty: StackOperandType::CallParam,
                 offset: self.nsaa,
             });
-            self.call_param.push_back(ret.clone());
+            self.call_params.push_back(ret.clone());
             self.nsaa += size;
         }
         ret
@@ -815,12 +966,12 @@ impl CallConvTrait for BaseCallConv {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VfpCallConv {
     // 结果有几种情况：1是r0-r3，2是在s0-s15，3是在内存里（StackOperand）。
-    pub call_param: Vec<AsmOperand>,
+    pub call_params: Vec<AsmOperand>,
     // 由于中间push了FP和LR，所以对于内存变量，访问的offset会有所不同
-    pub self_arg: Vec<AsmOperand>,
+    pub self_args: Vec<AsmOperand>,
     pub ret_reg: AsmOperand, // s0或者r0
     pub ncrn: i64,           //  Next Core Register Number
     pub nsaa: i64,           // Next Stacked Argument Address 计算结束后也是需要占用的栈空间大小
@@ -830,8 +981,8 @@ pub struct VfpCallConv {
 impl VfpCallConv {
     pub fn new() -> Self {
         Self {
-            call_param: Vec::new(),
-            self_arg: Vec::new(),
+            call_params: Vec::new(),
+            self_args: Vec::new(),
             ret_reg: AsmOperand::IntReg(IntReg {
                 ty: RegType::R0,
                 is_float: false,
@@ -856,8 +1007,8 @@ impl VfpCallConv {
                 // if is VFP CPRC (Co-processor Register Candidate)
                 if self.next_vfp < 16 {
                     let result = AsmOperand::VfpReg(VfpReg::from(self.next_vfp));
-                    self.call_param.push(result.clone());
-                    self.self_arg.push(result);
+                    self.call_params.push(result.clone());
+                    self.self_args.push(result);
                     self.next_vfp += 1;
                 } else {
                     assert_eq!(self.next_vfp, 16);
@@ -865,9 +1016,9 @@ impl VfpCallConv {
                         ty: StackOperandType::CallParam,
                         offset: self.nsaa,
                     });
-                    self.call_param.push(result.clone());
+                    self.call_params.push(result.clone());
                     //
-                    self.self_arg.push(AsmOperand::StackOperand(StackOperand {
+                    self.self_args.push(AsmOperand::StackOperand(StackOperand {
                         ty: StackOperandType::SelfArg,
                         offset: self.nsaa + 8,
                     }));
@@ -877,16 +1028,17 @@ impl VfpCallConv {
                 if (self.ncrn + (size / 4)) <= 4 {
                     // 寄存器能分配下
                     let result = AsmOperand::IntReg(IntReg::from(self.ncrn));
-                    self.call_param.push(result.clone());
-                    self.self_arg.push(result);
+                    self.call_params.push(result.clone());
+                    self.self_args.push(result);
                     self.ncrn = self.ncrn + (size / 4);
                 } else {
                     assert_eq!(self.ncrn, 4);
-                    self.call_param.push(AsmOperand::StackOperand(StackOperand {
-                        ty: StackOperandType::CallParam,
-                        offset: self.nsaa,
-                    }));
-                    self.self_arg.push(AsmOperand::StackOperand(StackOperand {
+                    self.call_params
+                        .push(AsmOperand::StackOperand(StackOperand {
+                            ty: StackOperandType::CallParam,
+                            offset: self.nsaa,
+                        }));
+                    self.self_args.push(AsmOperand::StackOperand(StackOperand {
                         ty: StackOperandType::SelfArg,
                         offset: self.nsaa + 8,
                     }));

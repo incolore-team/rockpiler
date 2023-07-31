@@ -1,6 +1,6 @@
 use crate::{ast::*, infer_eval::InferEvaluator, scope::*, symbol::*};
 use log::trace;
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SemaRef {
     pub symbol_id: SymbolId,
     pub scope_id: ScopeId,

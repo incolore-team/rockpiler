@@ -254,7 +254,8 @@ impl Mem2Reg<'_> {
             }
         }
 
-        if same_val.is_none() { // 所有operand都是phi自己
+        if same_val.is_none() {
+            // 所有operand都是phi自己
             // assert self.module.value_user[phi_id].is_empty()
             undef = true;
             same_val = Some(self.get_undef_value(self.module.get_inst(phi_id).ty()));

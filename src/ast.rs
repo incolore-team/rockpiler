@@ -1,13 +1,11 @@
-use std::collections::VecDeque;
-
 use crate::{ir::ValueId, sema::SemaRef};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TransUnit {
     pub func_decls: Vec<FuncDecl>,
     pub var_decls: Vec<VarDecl>,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PrefixOp {
     Incr,
     Decr,
@@ -17,7 +15,7 @@ pub enum PrefixOp {
     Neg,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InfixOp {
     BitAnd,
     BitOr,
@@ -40,7 +38,32 @@ pub enum InfixOp {
     Ge,
     Assign,
 }
-#[derive(Debug, PartialEq, Clone)]
+
+impl InfixOp {
+    pub fn is_commutative(&self) -> bool {
+        match self {
+            Self::BitAnd | Self::BitOr | Self::BitXor | Self::LogicAnd | Self::LogicOr => true,
+            Self::Add | Self::Mul => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_boolean(&self) -> bool {
+        match self {
+            Self::LogicAnd
+            | Self::LogicOr
+            | Self::Eq
+            | Self::Ne
+            | Self::Lt
+            | Self::Gt
+            | Self::Le
+            | Self::Ge => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PostfixOp {
     Incr,                     // ++
     Decr,                     // --
@@ -49,7 +72,7 @@ pub enum PostfixOp {
     IndexAccess(IndexAccess), // [index]
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CallAccess {
     pub id: String,
     pub args: Vec<Box<Expr>>,
@@ -57,19 +80,19 @@ pub struct CallAccess {
     pub sema_ref: Option<SemaRef>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IndexAccess {
     pub index: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DotAccess {
     pub field: String,
 
     pub sema_ref: Option<SemaRef>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FuncDecl {
     pub name: String,
     pub params: Vec<Param>,
@@ -85,7 +108,7 @@ impl FuncDecl {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VarDecl {
     pub name: String,
     pub type_: Type,
@@ -107,7 +130,7 @@ impl From<Param> for VarDecl {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Param {
     pub name: String,
     pub type_: Type,
@@ -125,11 +148,11 @@ impl Param {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Block {
     pub stmts: Vec<Box<Stmt>>,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Stmt {
     VarDecls(VarDecls),
     Expr(ExprStmt),
@@ -143,20 +166,20 @@ pub enum Stmt {
     Return(ReturnStmt),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ReturnStmt {
     pub expr: Option<Box<Expr>>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VarDecls {
     pub decls: Vec<VarDecl>,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ExprStmt {
     pub expr: Option<Box<Expr>>,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IfElseStmt {
     pub cond: Box<Expr>,
     pub then_stmt: Box<Stmt>,
@@ -164,47 +187,47 @@ pub struct IfElseStmt {
     pub else_then_stmts: Vec<Box<Stmt>>,
     pub else_stmt: Option<Box<Stmt>>,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct WhileStmt {
     pub cond: Box<Expr>,
     pub body: Box<Stmt>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BreakStmt {
     pub target: Option<ValueId>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ContinueStmt {
     pub target: Option<ValueId>,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ForStmt {
     pub init: Option<Box<Expr>>,
     pub cond: Option<Box<Expr>>,
     pub update: Option<Box<Expr>>,
     pub body: Box<Stmt>,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 
 pub struct DoWhileStmt {
     pub stmt: Box<Stmt>,
     pub cond: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InitVal {
     Expr(Box<Expr>),
     Array(ArrayInitVal),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ArrayInitVal(pub Vec<InitVal>);
 
 // ===================== Expr =====================
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Expr {
     Infix(InfixExpr),
     Prefix(PrefixExpr),
@@ -212,7 +235,7 @@ pub enum Expr {
     Primary(PrimaryExpr),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PrimaryExpr {
     Group(Box<Expr>),
     Call(CallExpr),
@@ -220,7 +243,7 @@ pub enum PrimaryExpr {
     Literal(Literal),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct InfixExpr {
     pub lhs: Box<Expr>,
     pub op: InfixOp,
@@ -230,7 +253,7 @@ pub struct InfixExpr {
     pub infer_val: Option<Literal>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PrefixExpr {
     pub op: PrefixOp,
     pub rhs: Box<Expr>,
@@ -239,7 +262,7 @@ pub struct PrefixExpr {
     pub infer_val: Option<Literal>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PostfixExpr {
     pub lhs: Box<Expr>,
     pub op: PostfixOp,
@@ -248,7 +271,7 @@ pub struct PostfixExpr {
     pub infer_val: Option<Literal>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CallExpr {
     pub id: String,
     pub args: Vec<Box<Expr>>,
@@ -259,7 +282,7 @@ pub struct CallExpr {
     pub infer_val: Option<Literal>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IdentExpr {
     pub id: String,
 
@@ -274,6 +297,11 @@ pub enum Literal {
     Bool(bool),
     String(String),
 }
+#[derive(Debug, PartialEq, Clone)]
+struct Double(f64);
+impl Eq for Double {}
+
+impl Eq for Literal {}
 
 impl From<Literal> for usize {
     fn from(literal: Literal) -> Self {
@@ -287,7 +315,7 @@ impl From<Literal> for usize {
 
 // ===================== End Expr =====================
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
     Builtin(BuiltinType),
     Pointer(PointerType),
@@ -305,6 +333,13 @@ impl Type {
         }
     }
 
+    pub fn as_array(&self) -> Option<&ArrayType> {
+        match self {
+            Type::Array(array) => Some(array),
+            _ => None,
+        }
+    }
+
     pub fn base_type(&self) -> &Type {
         match self {
             Type::Pointer(pointer) => &*pointer.base_type(),
@@ -314,7 +349,7 @@ impl Type {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum BuiltinType {
     Void,
     Bool,
@@ -328,6 +363,25 @@ pub enum BuiltinType {
     Int64,
     Float,
     Double,
+}
+
+impl BuiltinType {
+    pub fn size(&self) -> usize {
+        match self {
+            BuiltinType::Void => 0,
+            BuiltinType::Bool => 1,
+            BuiltinType::UChar => 1,
+            BuiltinType::Char => 1,
+            BuiltinType::UShort => 2,
+            BuiltinType::Short => 2,
+            BuiltinType::UInt => 4,
+            BuiltinType::Int => 4,
+            BuiltinType::UInt64 => 8,
+            BuiltinType::Int64 => 8,
+            BuiltinType::Float => 4,
+            BuiltinType::Double => 8,
+        }
+    }
 }
 
 impl Into<Type> for BuiltinType {
@@ -400,7 +454,7 @@ impl BuiltinType {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PointerType {
     pub type_: Box<Type>,
 }
@@ -417,13 +471,32 @@ impl PointerType {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ArrayType {
     Constant(ConstantArrayType),
     Incomplete(IncompleteArrayType),
 }
 
 impl ArrayType {
+    pub fn as_constant(&self) -> Option<&ConstantArrayType> {
+        match self {
+            ArrayType::Constant(array_type) => Some(array_type),
+            _ => None,
+        }
+    }
+
+    pub fn as_incomplete(&self) -> Option<&IncompleteArrayType> {
+        match self {
+            ArrayType::Incomplete(array_type) => Some(array_type),
+            _ => None,
+        }
+    }
+    pub fn size(&self) -> usize {
+        match self {
+            ArrayType::Constant(array_type) => array_type.size * array_type.element_type.size(),
+            ArrayType::Incomplete(array_type) => todo!(),
+        }
+    }
     pub fn element_type(&self) -> &Type {
         match self {
             ArrayType::Constant(array_type) => &array_type.element_type,
@@ -439,58 +512,59 @@ impl ArrayType {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ConstantArrayType {
     pub element_type: Box<Type>,
     pub size: usize,
     pub size_info: Option<Box<Expr>>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IncompleteArrayType {
     pub element_type: Box<Type>,
     pub size_info: Option<i64>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RecordType {
     pub tag_type: TagType,
     pub record_decl: RecordDecl,
 }
-#[derive(Debug, PartialEq, Clone)]
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TagType {
     pub tag_decl: TagDecl,
     pub keyword: Keyword,
 }
 
 // TagDecl结构体，表示记录类型的声明
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TagDecl {
     pub name: String,
     pub keyword: Keyword,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Keyword {
     Struct,
     Union,
     Class,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RecordDecl {
     pub tag_type: TagType,
     pub name: String,
     pub fields: Vec<FieldDecl>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FieldDecl {
     pub name: String,
     pub field_type: Box<Type>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FunctionType {
     pub return_type: Box<Type>,
     pub param_types: Vec<Box<Type>>,
@@ -498,7 +572,15 @@ pub struct FunctionType {
     pub is_variadic: bool,
 }
 impl Type {
-    // ...
+    pub fn size(&self) -> usize {
+        match self {
+            Type::Builtin(builtin) => builtin.size(),
+            Type::Pointer(_) => 8,
+            Type::Array(array) => array.size(),
+            Type::Record(record) => todo!(),
+            Type::Function(_) => 8,
+        }
+    }
 
     pub fn can_assign_from(&self, other_type: &Type) -> bool {
         match (self, other_type) {

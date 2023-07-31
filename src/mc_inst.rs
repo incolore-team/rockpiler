@@ -1,11 +1,14 @@
 use core::fmt;
 
-use crate::mc::{
-    AsmOperand, AsmValueId, CallConv, Imm, ImmTrait, IntReg, RegConstraintMap, RegType,
-    StackOperand,
+use crate::{
+    ast::InfixOp,
+    mc::{
+        AsmOperand, AsmValueId, CallConv, Imm, ImmTrait, IntReg, LabelImm, RegConstraintMap,
+        RegType, StackOperand, VirtReg,
+    },
 };
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ConstraintsComponent {
     pub in_constraints: RegConstraintMap,
     pub out_constraints: RegConstraintMap,
@@ -28,14 +31,13 @@ impl ConstraintsComponent {
         }
     }
 }
-
 pub trait ConstraintsTrait {
     fn get_in_constraints(&self) -> &RegConstraintMap;
     fn get_out_constraints(&self) -> &RegConstraintMap;
     fn get_in_constraints_mut(&mut self) -> &mut RegConstraintMap;
     fn get_out_constraints_mut(&mut self) -> &mut RegConstraintMap;
-    fn set_in_constraints(&mut self, in_constraints: RegConstraintMap);
-    fn set_out_constraints(&mut self, out_constraints: RegConstraintMap);
+    fn set_in_constraint(&mut self, key: VirtReg, value: AsmOperand);
+    fn set_out_constraint(&mut self, key: VirtReg, value: AsmOperand);
 }
 
 macro_rules! impl_constraints_trait {
@@ -57,21 +59,21 @@ macro_rules! impl_constraints_trait {
                 &mut self.constraints.out_constraints
             }
 
-            fn set_in_constraints(&mut self, in_constraints: RegConstraintMap) {
-                self.constraints.in_constraints = in_constraints;
+            fn set_in_constraint(&mut self, key: VirtReg, value: AsmOperand) {
+                self.constraints.in_constraints.insert(key, value);
             }
 
-            fn set_out_constraints(&mut self, out_constraints: RegConstraintMap) {
-                self.constraints.out_constraints = out_constraints;
+            fn set_out_constraint(&mut self, key: VirtReg, value: AsmOperand) {
+                self.constraints.out_constraints.insert(key, value);
             }
         }
     };
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct AsmOperandComponent {
-    pub defs: Vec<AsmOperand>,
-    pub uses: Vec<AsmOperand>,
+    defs: Vec<AsmOperand>,
+    uses: Vec<AsmOperand>,
 }
 
 impl AsmOperandComponent {
@@ -148,13 +150,14 @@ macro_rules! impl_asm_inst_trait {
     };
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 
 pub enum AsmInst {
     BinOp(BinOpInst),
     Br(BrInst),
     BX(BXInst),
     Call(CallInst),
+    TailCall(TailCallInst),
     CMP(CMPInst),
     FBinOp(FBinOpInst),
     FCMP(FCMPInst),
@@ -250,6 +253,20 @@ impl AsmInst {
     pub fn as_call_mut(&mut self) -> Option<&mut CallInst> {
         match self {
             AsmInst::Call(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_tail_call(&self) -> Option<&TailCallInst> {
+        match self {
+            AsmInst::TailCall(inst) => Some(inst),
+            _ => None,
+        }
+    }
+
+    pub fn as_tail_call_mut(&mut self) -> Option<&mut TailCallInst> {
+        match self {
+            AsmInst::TailCall(inst) => Some(inst),
             _ => None,
         }
     }
@@ -457,6 +474,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.get_defs(),
             AsmInst::Prologue(inst) => inst.get_defs(),
             AsmInst::RetInst(inst) => inst.get_defs(),
+            AsmInst::TailCall(inst) => inst.get_defs(),
         }
     }
 
@@ -479,6 +497,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.get_uses(),
             AsmInst::Prologue(inst) => inst.get_uses(),
             AsmInst::RetInst(inst) => inst.get_uses(),
+            AsmInst::TailCall(inst) => inst.get_uses(),
         }
     }
 
@@ -501,6 +520,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.get_uses_mut(),
             AsmInst::Prologue(inst) => inst.get_uses_mut(),
             AsmInst::RetInst(inst) => inst.get_uses_mut(),
+            AsmInst::TailCall(inst) => inst.get_uses_mut(),
         }
     }
 
@@ -523,6 +543,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.get_defs_mut(),
             AsmInst::Prologue(inst) => inst.get_defs_mut(),
             AsmInst::RetInst(inst) => inst.get_defs_mut(),
+            AsmInst::TailCall(inst) => inst.get_defs_mut(),
         }
     }
 
@@ -545,6 +566,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.set_uses(uses),
             AsmInst::Prologue(inst) => inst.set_uses(uses),
             AsmInst::RetInst(inst) => inst.set_uses(uses),
+            AsmInst::TailCall(inst) => inst.set_uses(uses),
         }
     }
 
@@ -567,6 +589,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.set_defs(defs),
             AsmInst::Prologue(inst) => inst.set_defs(defs),
             AsmInst::RetInst(inst) => inst.set_defs(defs),
+            AsmInst::TailCall(inst) => inst.set_defs(defs),
         }
     }
 }
@@ -585,6 +608,7 @@ impl_asm_from_trait!(BinOp, BinOpInst);
 impl_asm_from_trait!(Br, BrInst);
 impl_asm_from_trait!(BX, BXInst);
 impl_asm_from_trait!(Call, CallInst);
+impl_asm_from_trait!(Call, TailCallInst);
 impl_asm_from_trait!(CMP, CMPInst);
 impl_asm_from_trait!(FBinOp, FBinOpInst);
 impl_asm_from_trait!(FCMP, FCMPInst);
@@ -599,7 +623,7 @@ impl_asm_from_trait!(VSTR, VSTRInst);
 impl_asm_from_trait!(Prologue, PrologueInst);
 impl_asm_from_trait!(RetInst, RetInst);
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RetInst {
     pub func: AsmValueId,
     pub constraints: ConstraintsComponent,
@@ -616,7 +640,7 @@ impl RetInst {
 
 impl_constraints_trait!(RetInst);
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PrologueInst {
     pub func: AsmValueId,
     pub constraints: ConstraintsComponent,
@@ -633,17 +657,17 @@ impl PrologueInst {
 
 impl_constraints_trait!(PrologueInst);
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VMRSInst {}
 impl_asm_inst_trait_no_oprs!(VMRSInst);
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum VMovType {
     CPY,
     A2S,
     S2A,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VMovInst {
     pub ty: VMovType,
     pub oprs: AsmOperandComponent,
@@ -658,13 +682,13 @@ impl VMovInst {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum VCVTType {
     F2I,
     I2F,
     F2D,
 }
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VCVTInst {
     pub ty: VCVTType,
     pub oprs: AsmOperandComponent,
@@ -679,14 +703,14 @@ impl VCVTInst {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum MovType {
     Reg,
     Movw,
     Movt,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 
 pub struct MovInst {
     pub ty: MovType,
@@ -695,16 +719,20 @@ pub struct MovInst {
 }
 impl_asm_inst_trait!(MovInst);
 impl MovInst {
-    pub fn new(ty: MovType, to: AsmOperand, from: AsmOperand) -> Self {
+    pub fn new(ty: MovType, to: AsmOperand, from: AsmOperand, cond: Option<Cond>) -> Self {
         Self {
             ty,
             oprs: AsmOperandComponent::new(vec![to], vec![from]),
-            cond: Cond::AL,
+            cond: if let Some(cond) = cond {
+                cond
+            } else {
+                Cond::AL
+            },
         }
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FCMPInst {
     pub oprs: AsmOperandComponent,
 }
@@ -723,7 +751,7 @@ impl FCMPInst {
 * 4. fdiv - vdiv.f32
 * 5. 浮点数好像不支持取模
  */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FBinOpInst {
     pub op: BinaryOp,
     pub oprs: AsmOperandComponent,
@@ -738,7 +766,7 @@ impl FBinOpInst {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CMPInst {
     pub oprs: AsmOperandComponent,
 }
@@ -793,20 +821,55 @@ impl AsmInst {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 
 pub struct CallInst {
     /// jump target
-    pub label: AsmValueId,
+    pub label: LabelImm,
+    pub oprs: AsmOperandComponent,
     pub cc: CallConv,
     /// used to bind args to calling convention registers
     pub constraints: ConstraintsComponent,
 }
 
-impl_asm_inst_trait_no_oprs!(CallInst);
+impl_asm_inst_trait!(CallInst);
+impl_asm_inst_trait!(TailCallInst);
+
+impl CallInst {
+    pub fn new(label: LabelImm, cc: CallConv) -> Self {
+        Self {
+            label,
+            cc,
+            oprs: AsmOperandComponent::new(vec![], vec![]),
+            constraints: ConstraintsComponent::default(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct TailCallInst {
+    /// jump target
+    pub label: LabelImm,
+    pub oprs: AsmOperandComponent,
+    pub cc: CallConv,
+    /// used to bind args to calling convention registers
+    pub constraints: ConstraintsComponent,
+}
+
+impl TailCallInst {
+    pub fn new(label: LabelImm, cc: CallConv) -> Self {
+        Self {
+            label,
+            cc,
+            oprs: AsmOperandComponent::new(vec![], vec![]),
+            constraints: ConstraintsComponent::default(),
+        }
+    }
+}
+
 impl_constraints_trait!(CallInst);
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -823,9 +886,36 @@ pub enum BinaryOp {
     LogGe,
 }
 
+impl From<InfixOp> for BinaryOp {
+    fn from(op: InfixOp) -> Self {
+        match op {
+            InfixOp::Add => BinaryOp::Add,
+            InfixOp::Sub => BinaryOp::Sub,
+            InfixOp::Mul => BinaryOp::Mul,
+            InfixOp::Div => BinaryOp::Div,
+            InfixOp::Mod => BinaryOp::Mod,
+            InfixOp::BitAnd => todo!(),
+            InfixOp::BitOr => todo!(),
+            InfixOp::BitXor => todo!(),
+            InfixOp::BitShl => todo!(),
+            InfixOp::BitShr => todo!(),
+            InfixOp::LogicAnd => BinaryOp::LogAnd,
+            InfixOp::LogicOr => BinaryOp::LogOr,
+            InfixOp::Rem => todo!(),
+            InfixOp::Eq => BinaryOp::LogEq,
+            InfixOp::Ne => BinaryOp::LogNeq,
+            InfixOp::Lt => BinaryOp::LogLt,
+            InfixOp::Gt => BinaryOp::LogGt,
+            InfixOp::Le => BinaryOp::LogLe,
+            InfixOp::Ge => BinaryOp::LogGe,
+            InfixOp::Assign => todo!(),
+        }
+    }
+}
+
 /// https://developer.arm.com/documentation/dui0473/m/vfp-instructions/vstr--floating-point-
 /// VSTR{C} Fd, [Rn{, #<immed>}] imm范围0-1020
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 
 pub struct VLDRInst {
     pub oprs: AsmOperandComponent,
@@ -843,7 +933,7 @@ impl VLDRInst {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 
 pub struct LDRInst {
     pub oprs: AsmOperandComponent,
@@ -861,7 +951,7 @@ impl LDRInst {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct STRInst {
     pub oprs: AsmOperandComponent,
 }
@@ -878,7 +968,7 @@ impl STRInst {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VSTRInst {
     pub oprs: AsmOperandComponent,
 }
@@ -904,7 +994,7 @@ impl VSTRInst {
  * 4. SDIV Rd, Rn, Rm 有符号除法，同上
  * 5. 取模：不支持，在IR那边转换为调用相关eabi函数
  */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 
 pub struct BinOpInst {
     pub op: BinaryOp,
@@ -945,7 +1035,7 @@ impl Operand2 {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BrInst {
     cond: Cond,
     target: AsmValueId, // AsmBlock
@@ -963,7 +1053,7 @@ pub struct BrInstBuilder {
     inst: BrInst,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Cond {
     AL,
     EQ,
@@ -988,6 +1078,20 @@ impl Cond {
     }
 }
 
+impl From<InfixOp> for Cond {
+    fn from(op: InfixOp) -> Cond {
+        match op {
+            InfixOp::Eq => Cond::EQ,
+            InfixOp::Ne => Cond::NE,
+            InfixOp::Ge => Cond::GE,
+            InfixOp::Gt => Cond::GT,
+            InfixOp::Le => Cond::LE,
+            InfixOp::Lt => Cond::LT,
+            _ => unreachable!(),
+        }
+    }
+}
+
 impl fmt::Display for Cond {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -1002,7 +1106,7 @@ impl fmt::Display for Cond {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BXInst {
     pub oprs: AsmOperandComponent,
 }
