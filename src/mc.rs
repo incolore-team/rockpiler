@@ -411,6 +411,12 @@ impl From<VfpReg> for AsmOperand {
     }
 }
 
+impl From<IntImm> for AsmOperand {
+    fn from(imm: IntImm) -> Self {
+        AsmOperand::Imm(Imm::Int(imm))
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 
 pub enum Imm {
@@ -834,14 +840,14 @@ pub enum CallConv {
 }
 
 impl CallConv {
-    pub fn add_param(&mut self, param: ParamInfo) {
+    pub fn add_param(&mut self, param: ParamInfo) -> AsmOperand {
         match self {
             CallConv::BaseCallConv(base_call_conv) => base_call_conv.add_param(param),
             CallConv::VfpCallConv(vfp_call_conv) => vfp_call_conv.add_param(param),
         }
     }
 
-    pub fn get_stack_size(&self) -> u32 {
+    pub fn get_stack_size(&self) -> i64 {
         match self {
             CallConv::BaseCallConv(base_call_conv) => base_call_conv.get_stack_size(),
             CallConv::VfpCallConv(vfp_call_conv) => vfp_call_conv.get_stack_size(),
@@ -877,7 +883,10 @@ use core::fmt;
 /// https://learn.microsoft.com/zh-cn/cpp/build/overview-of-arm-abi-conventions?view=msvc-170
 use std::{collections::LinkedList, default};
 
-use crate::mc_inst::{AsmInst, MovInst, MovType, VMovInst, VMovType};
+use crate::{
+    ast::Type,
+    mc_inst::{AsmInst, MovInst, MovType, VMovInst, VMovType},
+};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BaseCallConv {
@@ -898,10 +907,19 @@ pub struct ParamInfo {
     pub base_type: AsmTypeTag,
 }
 
+impl From<Type> for ParamInfo {
+    fn from(ty: Type) -> Self {
+        Self {
+            is_pointer: ty.is_pointer(true),
+            base_type: AsmTypeTag::from(*ty.base_type()),
+        }
+    }
+}
+
 impl BaseCallConv {
     pub fn new() -> Self {
         Self {
-            call_params: LinkedList::new(),
+            call_params: Vec::new(),
             ret_reg: AsmOperand::IntReg(IntReg {
                 ty: RegType::R0,
                 is_float: false,
@@ -941,7 +959,7 @@ impl BaseCallConv {
                 ty,
                 is_float: false,
             });
-            self.call_params.push_back(ret.clone());
+            self.call_params.push(ret.clone());
             self.ncrn += size / 4;
         } else {
             assert_eq!(self.ncrn, 4);
@@ -949,7 +967,7 @@ impl BaseCallConv {
                 ty: StackOperandType::CallParam,
                 offset: self.nsaa,
             });
-            self.call_params.push_back(ret.clone());
+            self.call_params.push(ret.clone());
             self.nsaa += size;
         }
         ret

@@ -29,6 +29,8 @@ struct McBuilder<'a> {
     bb_map: HashMap<ValueId, AsmValueId>,
     // ir func -> asm func
     func_map: HashMap<ValueId, AsmValueId>,
+    // asm func -> ir func
+    func_map_rev: HashMap<AsmValueId, ValueId>,
     // ir gv -> asm gv
     gv_map: HashMap<ValueId, AsmValueId>,
     // ir value -> vreg
@@ -103,6 +105,7 @@ impl McBuilder<'_> {
             vfp_callconv_map: HashMap::new(),
             bb_map: HashMap::new(),
             func_map: HashMap::new(),
+            func_map_rev: HashMap::new(),
             gv_map: HashMap::new(),
             vreg_map: HashMap::new(),
             vreg_idx: 0,
@@ -292,24 +295,30 @@ impl McBuilder<'_> {
             if killed.contains(value) {
                 let temp = self.get_vreg(is_float);
 
-                let backup = if is_float {
-                    VMovInst::new(VMovType::CPY, temp, value.clone())
+                let backup_inst_id = if is_float {
+                    let inst = VMovInst::new(VMovType::CPY, temp.into(), value.clone());
+                    self.module.alloc_value(AsmValue::Inst(AsmInst::VMov(inst)))
                 } else {
-                    MovInst::new(MovType::REG, temp, value.clone(), None)
+                    let inst = MovInst::new(MovType::Reg, temp.into(), value.clone(), None);
+                    self.module.alloc_value(AsmValue::Inst(AsmInst::Mov(inst)))
                 };
-                to_add.splice(0..0, self.expand_inst_imm(backup));
-                let mov = if is_float {
-                    VMovInst::new(VMovType::CPY, key.clone(), temp)
+                to_add.splice(0..0, self.expand_inst_imm(backup_inst_id));
+                let mov_id = if is_float {
+                    let inst = VMovInst::new(VMovType::CPY, key.clone(), temp.into());
+                    self.module.alloc_value(AsmValue::Inst(AsmInst::VMov(inst)))
                 } else {
-                    MovInst::new(MovType::REG, key.clone(), temp, None)
+                    let inst = MovInst::new(MovType::Reg, key.clone(), temp.into(), None);
+                    self.module.alloc_value(AsmValue::Inst(AsmInst::Mov(inst)))
                 };
-                to_add.extend(self.expand_inst_imm(mov));
+                to_add.extend(self.expand_inst_imm(mov_id));
                 killed.insert(key.clone());
             } else {
                 let mov = if is_float {
-                    VMovInst::new(VMovType::CPY, key.clone(), value.clone())
+                    let inst = VMovInst::new(VMovType::CPY, key.clone(), value.clone());
+                    self.module.alloc_value(AsmValue::Inst(AsmInst::VMov(inst)))
                 } else {
-                    MovInst::new(MovType::REG, key.clone(), value.clone(), None)
+                    let inst = MovInst::new(MovType::Reg, key.clone(), value.clone(), None);
+                    self.module.alloc_value(AsmValue::Inst(AsmInst::Mov(inst)))
                 };
                 to_add.extend(self.expand_inst_imm(mov));
                 killed.insert(key.clone());
@@ -330,11 +339,14 @@ impl McBuilder<'_> {
                 let target_bb_id = jump_inst.bb;
                 let target_asm_bb_id = self.bb_map.get(&target_bb_id).unwrap();
                 let jmp_inst = BrInst::new(mc_inst::Cond::AL, target_asm_bb_id.clone());
+                let jmp_inst_id = self
+                    .module
+                    .alloc_value(AsmValue::Inst(AsmInst::Br(jmp_inst)));
                 let mut abb = self.module.get_bb_mut(asm_bb_id);
-                abb.insts.push(jmp_inst);
+                abb.insts.push(jmp_inst_id);
 
                 // 前驱后继维护
-                abb.succs = Some(vec![target_asm_bb_id.clone()]);
+                abb.succs = vec![target_asm_bb_id.clone()];
                 let mut target_bb = self.module.get_bb_mut(target_asm_bb_id.clone());
                 target_bb.preds.push(asm_bb_id);
             }
@@ -358,38 +370,43 @@ impl McBuilder<'_> {
                 if prev.is_some() {
                     return;
                 }
-                let ret_inst = RetInst::new(asm_func_id);
+                let mut asm_ret_inst = RetInst::new(asm_func_id);
                 let mut abb = self.module.get_bb_mut(asm_bb_id);
                 if ret_inst.value.is_some() {
-                    let cc = self.get_cc(self.func_map.get(&asm_func_id).unwrap());
+                    let cc = self.get_cc(self.func_map_rev.get(&asm_func_id).unwrap());
                     let mut op =
                         self.convert_value(ret_inst.value.unwrap(), asm_func_id, asm_bb_id);
-                    self.expand_imm(&mut op, &mut ret_inst.get_uses_mut(), &mut abb.insts);
-                    let op = ret_inst.get_uses().first().unwrap();
+                    self.expand_imm(&mut op, &mut asm_ret_inst.get_uses_mut(), &mut abb.insts);
+                    let op = asm_ret_inst.get_uses().first().unwrap();
                     assert!(op.as_virt_reg().is_some());
                     if let AsmOperand::VfpReg(vfp_reg) = &cc.as_vfp_call_conv().ret_reg {
-                        ret_inst.set_in_constraint(op.as_virt_reg().unwrap(), vfp_reg.clone());
-                    } else if let AsmOperand::Reg(reg) = &cc.as_vfp_call_conv().ret_reg {
-                        ret_inst.set_in_constraint(op.as_virt_reg().unwrap(), reg.clone());
+                        asm_ret_inst
+                            .set_in_constraint(*op.as_virt_reg().unwrap(), vfp_reg.clone().into());
+                    } else if let AsmOperand::IntReg(reg) = &cc.as_vfp_call_conv().ret_reg {
+                        asm_ret_inst
+                            .set_in_constraint(*op.as_virt_reg().unwrap(), reg.clone().into());
                     } else {
                         panic!("Unsupported operation");
                     }
                 }
                 let ret_inst_id = self
                     .module
-                    .alloc_value(AsmValue::Inst(AsmInst::RetInst(ret_inst)));
+                    .alloc_value(AsmValue::Inst(AsmInst::RetInst(asm_ret_inst)));
                 abb.insts.push(ret_inst_id);
-                abb.succ = Some(vec![]);
+                abb.succs = vec![];
             }
-            InstValue::Branch(_) => {
-                let inst = inst_.downcast_ref::<BranchInst>().unwrap();
-                let cond = self.convert_value(&inst.get_operand0(), asm_func_id, asm_bb_id);
-                let tb = self.bb_map.get(&inst.get_operand1().b).unwrap();
-                let fb = self.bb_map.get(&inst.get_operand2().b).unwrap();
+            InstValue::Branch(br_inst) => {
+                let cond = self.convert_value(br_inst.cond, asm_func_id, asm_bb_id);
+                let tb = self.bb_map.get(&br_inst.then_bb).unwrap();
+                let fb = self.bb_map.get(&br_inst.else_bb).unwrap();
                 let mut abb = self.module.get_bb_mut(asm_bb_id);
-                abb.insts
-                    .extend(self.expand_cmp_imm(CMPInst::new(cond, IntImm::new(0))));
-                if tb == abb.next.as_ref() {
+                let cmp_inst = CMPInst::new(cond, IntImm::new(0).into());
+                let cmp_inst_id = self
+                    .module
+                    .alloc_value(AsmValue::Inst(AsmInst::CMP(cmp_inst)));
+                let insts = self.expand_cmp_imm(cmp_inst_id);
+                abb.insts.extend(insts);
+                if *tb == abb.next.unwrap() {
                     //  ==0 跳转到false
                     // abb.insts.push(
                     //     BrInst::builder(fb)
@@ -402,7 +419,7 @@ impl McBuilder<'_> {
                         .module
                         .alloc_value(AsmValue::Inst(AsmInst::Br(br_inst)));
                     abb.insts.push(br_inst_id);
-                } else if fb == abb.next.as_ref() {
+                } else if *fb == abb.next.unwrap() {
                     // != 0跳转到true
                     // abb.insts.push(
                     //     BrInst::builder(tb)
@@ -429,7 +446,7 @@ impl McBuilder<'_> {
                         .alloc_value(AsmValue::Inst(AsmInst::Br(br_inst)));
                     abb.insts.push(br_inst_id);
                 }
-                abb.succs = Some(vec![tb.clone(), fb.clone()]);
+                abb.succs = vec![tb.clone(), fb.clone()];
             }
             _ => panic!("Unknown Terminator Inst."),
         }
@@ -521,12 +538,13 @@ impl McBuilder<'_> {
                 if !ssa_func.is_variadic {
                     let cc = self.get_cc(&ssa_func_id);
                     if call.must_tail {
-                        call_inst = mc_inst::TailCallInst::new(
+                        call_inst = mc_inst::CallInst::new(
                             LabelImm::new(format!(".LBB_{}_tail_call", ssa_func.name)),
                             cc,
                         );
                     } else {
-                        call_inst = mc_inst::CallInst::new(LabelImm::new(ssa_func.name), cc);
+                        call_inst =
+                            mc_inst::CallInst::new_tail_call(LabelImm::new(ssa_func.name), cc);
                     }
 
                     for i in 0..ssa_func.params.len() {
@@ -537,7 +555,7 @@ impl McBuilder<'_> {
                         };
 
                         let op = self.convert_value(call.args[i], asm_func_id, asm_bb_id);
-                        self.process_call_arg(call_inst, op, loc, asm_bb_id, false);
+                        self.process_call_arg(&mut call_inst, op, loc, asm_bb_id, false);
                     }
                 } else {
                     let param_tys = ssa_func
@@ -546,10 +564,11 @@ impl McBuilder<'_> {
                         .map(|var_id| {
                             let var_val = self.ir_module.get_value(*var_id);
                             let ty = var_val.as_variable().unwrap().ty;
-                            ty
+                            ParamInfo::from(ty)
                         })
-                        .collect();
-                    let cc = BaseCallConv::new().resolve(&param_tys, &ssa_func.ret_ty.into());
+                        .collect::<Vec<_>>();
+
+                    let cc = BaseCallConv::new().resolve(&param_tys, ssa_func.ret_ty.into());
 
                     for i in 0..call.args.len() {
                         let arg_val = self.ir_module.get_value(call.args[i]);
@@ -557,33 +576,36 @@ impl McBuilder<'_> {
 
                         if i >= ssa_func.params.len() {
                             // variadic
-                            cc.add_param(arg_val.ty());
+                            cc.add_param(arg_val.ty().into());
                             if arg_val.ty() == BuiltinType::Double.into() {
                                 is_lift_double = true;
                             }
                         }
 
                         let loc = cc.call_params[i];
-                        let op = self.convert_value(arg_val, asm_func_id, asm_bb_id);
+                        let op = self.convert_value(call.args[i], asm_func_id, asm_bb_id);
                         self.process_call_arg(&mut call_inst, op, loc, asm_bb_id, is_lift_double);
                     }
                 }
 
-                if let Some(ret) = call_inst.cc.get_ret_reg() {
-                    let ret_val = self.convert_value(call, asm_func_id, asm_bb_id);
-                    call_inst.defs.insert(ret_val);
+                if let ret = call_inst.cc.get_ret_reg() {
+                    let ret_val = self.convert_value(inst_id, asm_func_id, asm_bb_id);
+                    call_inst.get_defs_mut().push(ret_val);
                     if let AsmOperand::IntReg(reg) = ret {
-                        call_inst.set_out_constraint(ret_val, reg);
+                        call_inst.set_out_constraint(*ret_val.as_virt_reg().unwrap(), reg.into());
                     } else if let AsmOperand::VfpReg(reg) = ret {
-                        call_inst.set_out_constraint(ret_val, reg);
+                        call_inst.set_out_constraint(*ret_val.as_virt_reg().unwrap(), reg.into());
                     } else {
                         unimplemented!();
                     }
                 }
 
-                func.sm.preserve_arg_size(call_inst.cc.stack_size());
-
-                abb.insts.push(call_inst);
+                func.stack_state
+                    .preserve_arg_size(call_inst.cc.get_stack_size());
+                let call_inst_id = self
+                    .module
+                    .alloc_value(AsmValue::Inst(AsmInst::Call(call_inst)));
+                abb.insts.push(call_inst_id);
             }
 
             InstValue::Cast(cast) => {

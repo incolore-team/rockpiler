@@ -825,6 +825,7 @@ impl AsmInst {
 
 pub struct CallInst {
     /// jump target
+    pub tail_call: bool,
     pub label: LabelImm,
     pub oprs: AsmOperandComponent,
     pub cc: CallConv,
@@ -838,6 +839,17 @@ impl_asm_inst_trait!(TailCallInst);
 impl CallInst {
     pub fn new(label: LabelImm, cc: CallConv) -> Self {
         Self {
+            tail_call: false,
+            label,
+            cc,
+            oprs: AsmOperandComponent::new(vec![], vec![]),
+            constraints: ConstraintsComponent::default(),
+        }
+    }
+
+    pub fn new_tail_call(label: LabelImm, cc: CallConv) -> Self {
+        Self {
+            tail_call: true,
             label,
             cc,
             oprs: AsmOperandComponent::new(vec![], vec![]),
