@@ -485,10 +485,10 @@ impl McBuilder<'_> {
         inst_id: ValueId,
         asm_bb_id: AsmValueId,
     ) {
-        let func = self.module.get_func_mut(asm_func_id);
         let inst = self.ir_module.get_inst(inst_id);
         match inst {
             InstValue::Alloca(alloca) => {
+                let func = self.module.get_func_mut(asm_func_id);
                 let offset = func.stack_state.alloc_local(alloca.ty.size() as i64);
                 let bin = BinOpInst::new(
                     BinaryOp::Sub,
@@ -582,23 +582,25 @@ impl McBuilder<'_> {
 
                     if call.must_tail {
                         call_inst = mc_inst::CallInst::new(
-                            LabelImm::new(format!(".LBB_{}_tail_call", ssa_func.name)),
-                            cc,
+                            LabelImm::new(format!(".LBB_{}_tail_call", ssa_func.name.clone())),
+                            cc.clone(),
                         );
                     } else {
-                        call_inst =
-                            mc_inst::CallInst::new_tail_call(LabelImm::new(ssa_func.name), cc);
+                        call_inst = mc_inst::CallInst::new_tail_call(
+                            LabelImm::new(ssa_func.name.clone()),
+                            cc.clone(),
+                        );
                     }
 
                     for i in 0..ssa_func.params.len() {
                         let loc = if call.must_tail {
-                            cc.as_vfp_call_conv().self_args[i]
+                            &cc.as_vfp_call_conv().self_args[i]
                         } else {
-                            cc.as_vfp_call_conv().call_params[i]
+                            &cc.as_vfp_call_conv().call_params[i]
                         };
 
                         let op = self.convert_value(call.args[i], asm_func_id, asm_bb_id);
-                        self.process_call_arg(&mut call_inst, op, loc, asm_bb_id, false);
+                        self.process_call_arg(&mut call_inst, op, loc.clone(), asm_bb_id, false);
                     }
                 } else {
                     let param_tys = ssa_func
@@ -606,13 +608,17 @@ impl McBuilder<'_> {
                         .iter()
                         .map(|var_id| {
                             let var_val = self.ir_module.get_value(*var_id);
-                            let ty = var_val.as_variable().unwrap().ty;
+                            let ty = var_val.as_variable().unwrap().ty.clone();
                             ParamInfo::from(ty)
                         })
                         .collect::<Vec<_>>();
 
-                    let mut cc = BaseCallConv::new().resolve(&param_tys, ssa_func.ret_ty.into());
-
+                    let mut cc =
+                        BaseCallConv::new().resolve(&param_tys, ssa_func.ret_ty.clone().into());
+                    call_inst = mc_inst::CallInst::new(
+                        LabelImm::new(ssa_func.name.clone()),
+                        CallConv::BaseCallConv(cc.clone()),
+                    );
                     for i in 0..call.args.len() {
                         let arg_val = self.ir_module.get_value(call.args[i]);
                         let mut is_lift_double = false;
@@ -625,15 +631,21 @@ impl McBuilder<'_> {
                             }
                         }
 
-                        let loc = cc.call_params[i];
+                        let loc = &cc.call_params[i];
                         let op = self.convert_value(call.args[i], asm_func_id, asm_bb_id);
-                        self.process_call_arg(&mut call_inst, op, loc, asm_bb_id, is_lift_double);
+                        self.process_call_arg(
+                            &mut call_inst,
+                            op,
+                            loc.clone(),
+                            asm_bb_id,
+                            is_lift_double,
+                        );
                     }
                 }
 
                 if let ret = call_inst.cc.get_ret_reg() {
                     let ret_val = self.convert_value(inst_id, asm_func_id, asm_bb_id);
-                    call_inst.get_defs_mut().push(ret_val);
+                    call_inst.get_defs_mut().push(ret_val.clone());
                     if let AsmOperand::IntReg(reg) = ret {
                         call_inst.set_out_constraint(*ret_val.as_virt_reg().unwrap(), reg.into());
                     } else if let AsmOperand::VfpReg(reg) = ret {
@@ -642,7 +654,7 @@ impl McBuilder<'_> {
                         unimplemented!();
                     }
                 }
-
+                let func = self.module.get_func_mut(asm_func_id);
                 func.stack_state
                     .preserve_arg_size(call_inst.cc.get_stack_size());
                 let call_inst_id = self
@@ -657,10 +669,8 @@ impl McBuilder<'_> {
                 match cast.op {
                     CastOp::BitCast => {
                         // No-op casts like string -> i8*
-                        let vreg = self
-                            .convert_value(cast.value, asm_func_id, asm_bb_id)
-                            .as_virt_reg()
-                            .unwrap();
+                        let tmp = self.convert_value(cast.value, asm_func_id, asm_bb_id);
+                        let vreg = tmp.as_virt_reg().unwrap();
                         self.vreg_map.insert(inst_id, *vreg);
                     }
                     CastOp::FPToSI => {
@@ -672,11 +682,15 @@ impl McBuilder<'_> {
 
                         let vcvt = VCVTInst::new(VCVTType::F2I, mid.into(), op);
                         let vcvt_id = self.module.alloc_value(AsmValue::Inst(AsmInst::VCVT(vcvt)));
-                        let abb = self.module.get_bb_mut(asm_bb_id);
 
-                        abb.insts.append(&mut self.expand_inst_imm(vcvt_id));
+                        let mut insts = self.expand_inst_imm(vcvt_id);
+                        let abb = self.module.get_bb_mut(asm_bb_id);
+                        abb.insts.append(&mut insts);
+
                         let vmov = VMovInst::new(VMovType::S2A, to, mid.into());
                         let vmov_id = self.module.alloc_value(AsmValue::Inst(AsmInst::VMov(vmov)));
+
+                        let abb = self.module.get_bb_mut(asm_bb_id);
                         abb.insts.push(vmov_id);
                     }
                     CastOp::SIToFP => {
@@ -688,27 +702,25 @@ impl McBuilder<'_> {
 
                         let vmov = VMovInst::new(VMovType::A2S, mid.into(), op);
                         let vmov_id = self.module.alloc_value(AsmValue::Inst(AsmInst::VMov(vmov)));
+                        let mut insts = self.expand_inst_imm(vmov_id);
                         let abb = self.module.get_bb_mut(asm_bb_id);
-                        abb.insts.append(&mut self.expand_inst_imm(vmov_id));
+                        abb.insts.append(&mut insts);
 
                         let vcvt = VCVTInst::new(VCVTType::I2F, to, mid.into());
                         let vcvt_id = self.module.alloc_value(AsmValue::Inst(AsmInst::VCVT(vcvt)));
+                        let abb = self.module.get_bb_mut(asm_bb_id);
                         abb.insts.push(vcvt_id);
                     }
                     CastOp::FPExt => {
                         // Ignore float -> double promotion for variadic args
-                        let vreg = self
-                            .convert_value(cast.value, asm_func_id, asm_bb_id)
-                            .as_virt_reg()
-                            .unwrap();
+                        let tmp = self.convert_value(cast.value, asm_func_id, asm_bb_id);
+                        let vreg = tmp.as_virt_reg().unwrap();
                         self.vreg_map.insert(inst_id, *vreg);
                     }
                     CastOp::ZExt => {
                         // i1 -> i32 extension, no-op
-                        let vreg = self
-                            .convert_value(cast.value, asm_func_id, asm_bb_id)
-                            .as_virt_reg()
-                            .unwrap();
+                        let tmp = self.convert_value(cast.value, asm_func_id, asm_bb_id);
+                        let vreg = tmp.as_virt_reg().unwrap();
                         self.vreg_map.insert(inst_id, *vreg);
                     }
                     _ => unimplemented!("{:?}", cast),
@@ -771,11 +783,11 @@ impl McBuilder<'_> {
         is_lift_double: bool,
     ) {
         // If it's a constant, convert it. Ensure that all parameters are inside the register.
-        let abb = self.module.get_bb_mut(asm_bb_id);
         if let AsmOperand::Imm(imm) = &op {
             let tmp = self.get_vreg(imm.is_float());
-            abb.insts
-                .extend(self.module.load_imm(AsmOperand::VirtReg(tmp), &imm));
+            let insts = self.module.load_imm(AsmOperand::VirtReg(tmp), &imm);
+            let abb = self.module.get_bb_mut(asm_bb_id);
+            abb.insts.extend(insts);
             op = AsmOperand::VirtReg(tmp);
         }
         assert!(matches!(op, AsmOperand::VirtReg(_)));
@@ -788,6 +800,7 @@ impl McBuilder<'_> {
                 let mut vcvt =
                     VCVTInst::new(VCVTType::F2D, VfpDoubleReg::default().into(), vreg.into());
                 let vcvt_id = self.module.alloc_value(AsmValue::Inst(AsmInst::VCVT(vcvt)));
+                let abb = self.module.get_bb_mut(asm_bb_id);
                 abb.insts.push(vcvt_id);
                 match loc {
                     AsmOperand::IntReg(reg) => {
@@ -795,7 +808,7 @@ impl McBuilder<'_> {
                         assert!(reg.ty == RegType::R0 || reg.ty == RegType::R2);
                         let mut vmov = VMovInst::new(
                             VMovType::S2A,
-                            reg.into(),
+                            reg.clone().into(),
                             VfpDoubleReg::default().into(),
                         );
                         let next = IntReg {
@@ -804,14 +817,16 @@ impl McBuilder<'_> {
                         };
                         vmov.get_defs_mut().push(next.into());
                         let vmov_id = self.module.alloc_value(AsmValue::Inst(AsmInst::VMov(vmov)));
+                        let abb = self.module.get_bb_mut(asm_bb_id);
                         abb.insts.push(vmov_id);
                     }
                     AsmOperand::StackOperand(_) => {
                         // vcvt.f64.f32 d16, Sn +  vstr.64 d16, [sp]
                         let vstr = VSTRInst::new(VfpDoubleReg::default().into(), loc);
                         let vstr_id = self.module.alloc_value(AsmValue::Inst(AsmInst::VSTR(vstr)));
-                        abb.insts
-                            .extend(self.expand_stack_operand_load_store(vstr_id));
+                        let insts = self.expand_stack_operand_load_store(vstr_id);
+                        let abb = self.module.get_bb_mut(asm_bb_id);
+                        abb.insts.extend(insts);
                     }
                     _ => panic!("Unsupported operation"),
                 }
@@ -843,9 +858,9 @@ impl McBuilder<'_> {
                         let store_id = self.module.alloc_value(AsmValue::Inst(AsmInst::STR(store)));
                         store_id
                     };
-
-                    abb.insts
-                        .extend(self.expand_stack_operand_load_store(store_id));
+                    let insts = self.expand_stack_operand_load_store(store_id);
+                    let abb = self.module.get_bb_mut(asm_bb_id);
+                    abb.insts.extend(insts);
                 }
                 _ => (),
             }
@@ -878,7 +893,7 @@ impl McBuilder<'_> {
 
         let mut current = addr;
         let mut offset: i64 = 0;
-        for idx_val_id in gep_inst.indices {
+        for idx_val_id in gep_inst.indices.clone() {
             let val = self.ir_module.get_value(idx_val_id);
             if let Value::Const(cv) = &val {
                 let num = cv.as_int().unwrap().value;

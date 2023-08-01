@@ -915,9 +915,10 @@ pub struct ParamInfo {
 
 impl From<Type> for ParamInfo {
     fn from(ty: Type) -> Self {
+        let bt = ty.base_type();
         Self {
             is_pointer: ty.is_pointer(true),
-            base_type: AsmTypeTag::from(*ty.base_type()),
+            base_type: AsmTypeTag::from(bt.clone()),
         }
     }
 }
