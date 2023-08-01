@@ -3,25 +3,18 @@ use core::fmt;
 use crate::{
     ast::InfixOp,
     mc::{
-        AsmOperand, AsmValueId, CallConv, Imm, ImmTrait, IntReg, LabelImm, RegConstraintMap,
-        RegType, StackOperand, VirtReg,
+        AsmOperand, AsmValueId, CallConv, Imm, ImmTrait, LabelImm, RegConstraintMap, StackOperand, VirtReg,
     },
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Default)]
 pub struct ConstraintsComponent {
     pub in_constraints: RegConstraintMap,
     pub out_constraints: RegConstraintMap,
 }
 
-impl Default for ConstraintsComponent {
-    fn default() -> Self {
-        Self {
-            in_constraints: RegConstraintMap::new(),
-            out_constraints: RegConstraintMap::new(),
-        }
-    }
-}
+
 
 impl ConstraintsComponent {
     pub fn new(in_constraints: RegConstraintMap, out_constraints: RegConstraintMap) -> Self {
@@ -110,11 +103,11 @@ macro_rules! impl_asm_inst_trait_no_oprs {
                 unimplemented!()
             }
 
-            fn set_uses(&mut self, uses: Vec<AsmOperand>) {
+            fn set_uses(&mut self, _uses: Vec<AsmOperand>) {
                 unimplemented!()
             }
 
-            fn set_defs(&mut self, defs: Vec<AsmOperand>) {
+            fn set_defs(&mut self, _defs: Vec<AsmOperand>) {
                 unimplemented!()
             }
         }

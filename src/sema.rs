@@ -64,7 +64,7 @@ fn eval_array_type(at: &mut ArrayType, symbol_table: &mut SymbolTable) {
                 .size_info
                 .as_ref()
                 .unwrap()
-                .eval_literal(&symbol_table)
+                .eval_literal(symbol_table)
                 .unwrap()
                 .into();
             if let Type::Array(at) = const_at.element_type.as_mut() {
@@ -136,14 +136,14 @@ impl ToSemaTrait for InfixExpr {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.lhs.to_sema(symbol_table);
         self.rhs.to_sema(symbol_table);
-        self.infer_ty = self.infer_type(&symbol_table);
+        self.infer_ty = self.infer_type(symbol_table);
     }
 }
 
 impl ToSemaTrait for PrefixExpr {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
         self.rhs.to_sema(symbol_table);
-        self.infer_ty = self.infer_type(&symbol_table);
+        self.infer_ty = self.infer_type(symbol_table);
     }
 }
 
@@ -156,7 +156,7 @@ impl ToSemaTrait for PostfixExpr {
             PostfixOp::DotAccess(dot_access) => dot_access.to_sema(symbol_table),
             PostfixOp::IndexAccess(index_access) => index_access.to_sema(symbol_table),
         }
-        self.infer_ty = self.infer_type(&symbol_table);
+        self.infer_ty = self.infer_type(symbol_table);
     }
 }
 

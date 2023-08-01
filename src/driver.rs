@@ -9,7 +9,7 @@ use crate::{
 };
 
 pub fn drive(args: Args) {
-    assert!(args.inputs.len() > 0);
+    assert!(!args.inputs.is_empty());
     let prelude = include_str!("prelude.c").to_string();
     for f_input in args.inputs {
         trace!("compiling {:?}", f_input);
@@ -37,7 +37,7 @@ pub fn drive(args: Args) {
 
         trace!("================== SSA Module as LLVM IR ==================");
         ir_printer::print(&mut module);
-        let mut arm_module = mc_builder::build(&mut module);
+        let _arm_module = mc_builder::build(&mut module);
 
     }
 }

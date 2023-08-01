@@ -342,7 +342,7 @@ impl Type {
 
     pub fn base_type(&self) -> &Type {
         match self {
-            Type::Pointer(pointer) => &*pointer.base_type(),
+            Type::Pointer(pointer) => pointer.base_type(),
             Type::Array(array) => array.base_type(),
             _ => self,
         }
@@ -384,33 +384,33 @@ impl BuiltinType {
     }
 }
 
-impl Into<Type> for BuiltinType {
-    fn into(self) -> Type {
-        Type::Builtin(self)
+impl From<BuiltinType> for Type {
+    fn from(val: BuiltinType) -> Self {
+        Type::Builtin(val)
     }
 }
 
-impl Into<Type> for PointerType {
-    fn into(self) -> Type {
-        Type::Pointer(self)
+impl From<PointerType> for Type {
+    fn from(val: PointerType) -> Self {
+        Type::Pointer(val)
     }
 }
 
-impl Into<Type> for ArrayType {
-    fn into(self) -> Type {
-        Type::Array(self)
+impl From<ArrayType> for Type {
+    fn from(val: ArrayType) -> Self {
+        Type::Array(val)
     }
 }
 
-impl Into<Type> for RecordType {
-    fn into(self) -> Type {
-        Type::Record(self)
+impl From<RecordType> for Type {
+    fn from(val: RecordType) -> Self {
+        Type::Record(val)
     }
 }
 
-impl Into<Type> for FunctionType {
-    fn into(self) -> Type {
-        Type::Function(self)
+impl From<FunctionType> for Type {
+    fn from(val: FunctionType) -> Self {
+        Type::Function(val)
     }
 }
 
@@ -494,7 +494,7 @@ impl ArrayType {
     pub fn size(&self) -> usize {
         match self {
             ArrayType::Constant(array_type) => array_type.size * array_type.element_type.size(),
-            ArrayType::Incomplete(array_type) => todo!(),
+            ArrayType::Incomplete(_array_type) => todo!(),
         }
     }
     pub fn element_type(&self) -> &Type {
@@ -578,7 +578,7 @@ impl Type {
             Type::Builtin(builtin) => builtin.size(),
             Type::Pointer(_) => 8,
             Type::Array(array) => array.size(),
-            Type::Record(record) => todo!(),
+            Type::Record(_record) => todo!(),
             Type::Function(_) => 8,
         }
     }
@@ -591,7 +591,7 @@ impl Type {
             }
             // Pointer types can be assigned from compatible Pointer types
             (Type::Pointer(pointer_self), Type::Pointer(pointer_other)) => {
-                pointer_self.type_.can_assign_from(&*pointer_other.type_)
+                pointer_self.type_.can_assign_from(&pointer_other.type_)
             }
             // Array types can be assigned from compatible Array types
             (Type::Array(array_self), Type::Array(array_other)) => {
@@ -599,12 +599,12 @@ impl Type {
                     (ArrayType::Constant(const_self), ArrayType::Constant(const_other)) => {
                         const_self
                             .element_type
-                            .can_assign_from(&*const_other.element_type)
+                            .can_assign_from(&const_other.element_type)
                             && const_self.size == const_other.size
                     }
                     (ArrayType::Incomplete(inc_self), ArrayType::Incomplete(inc_other)) => inc_self
                         .element_type
-                        .can_assign_from(&*inc_other.element_type),
+                        .can_assign_from(&inc_other.element_type),
                     _ => false,
                 }
             }
@@ -616,13 +616,13 @@ impl Type {
             (Type::Function(func_self), Type::Function(func_other)) => {
                 func_self
                     .return_type
-                    .can_assign_from(&*func_other.return_type)
+                    .can_assign_from(&func_other.return_type)
                     && func_self.param_count == func_other.param_count
                     && func_self
                         .param_types
                         .iter()
                         .zip(func_other.param_types.iter())
-                        .all(|(param_self, param_other)| param_self.can_assign_from(&**param_other))
+                        .all(|(param_self, param_other)| param_self.can_assign_from(param_other))
                     && func_self.is_variadic == func_other.is_variadic
             }
             // All other combinations are not assignable

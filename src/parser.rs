@@ -6,7 +6,7 @@ use pest::{
     Parser,
 };
 
-use crate::{ast::*, ir::ValueId};
+use crate::{ast::*};
 type ParseResult<T> = Result<T, Box<ParseError<Rule>>>;
 
 trait IntoParseResult<T> {
@@ -44,10 +44,10 @@ lazy_static::lazy_static! {
     // lhs_expr = { id ~ (index_access | dot_access)* }
     static ref PRATT_PARSER_LHS_EXPR : PrattParser<Rule> = {
         use pest::pratt_parser::*;
-        let pratt = PrattParser::new()
+        
+        PrattParser::new()
             .op(Op::postfix(Rule::index_access)
-                | Op::postfix(Rule::dot_access));
-        pratt
+                | Op::postfix(Rule::dot_access))
     };
 }
 
@@ -55,7 +55,8 @@ lazy_static::lazy_static! {
     static ref PRATT_PARSER_EXPR: PrattParser<Rule> = {
         use pest::pratt_parser::*;
         // Precedence is defined lowest to highest
-        let pratt = PrattParser::new()
+        
+        PrattParser::new()
         // Level 13
         .op(Op::infix(Rule::assign, Assoc::Right))
         // Level 12
@@ -96,8 +97,7 @@ lazy_static::lazy_static! {
         .op(Op::postfix(Rule::postfix_incr)
             | Op::postfix(Rule::call_access)
             | Op::postfix(Rule::index_access)
-            | Op::postfix(Rule::dot_access));
-        pratt
+            | Op::postfix(Rule::dot_access))
     };
 }
 
@@ -404,7 +404,7 @@ pub fn parse_index_access(pair: Pair<Rule>) -> ParseResult<Box<Expr>> {
 pub fn parse_expr_stmt(pair: Pair<Rule>) -> ParseResult<ExprStmt> {
     _debug_rule("parse_expr_stmt", &pair);
     let mut inner = pair.into_inner();
-    let expr = inner.next().map(|pair| parse_expr(pair)).transpose()?;
+    let expr = inner.next().map(parse_expr).transpose()?;
     Ok(ExprStmt { expr })
 }
 
@@ -460,9 +460,9 @@ pub fn parse_while_stmt(pair: Pair<Rule>) -> ParseResult<WhileStmt> {
 pub fn parse_for_stmt(pair: Pair<Rule>) -> ParseResult<ForStmt> {
     _debug_rule("parse_for_stmt", &pair);
     let mut inner = pair.into_inner().skip(1);
-    let init = inner.next().map(|pair| parse_expr(pair)).transpose()?;
-    let cond = inner.next().map(|pair| parse_expr(pair)).transpose()?;
-    let update = inner.next().map(|pair| parse_expr(pair)).transpose()?;
+    let init = inner.next().map(parse_expr).transpose()?;
+    let cond = inner.next().map(parse_expr).transpose()?;
+    let update = inner.next().map(parse_expr).transpose()?;
     let stmt = parse_stmt(inner.next().unwrap())?;
     Ok(ForStmt {
         init,
@@ -504,7 +504,7 @@ pub fn parse_return_stmt(pair: Pair<Rule>) -> ParseResult<ReturnStmt> {
     let expr = inner
         .skip(1)
         .next()
-        .map(|pair| parse_expr(pair))
+        .map(parse_expr)
         .transpose()?;
     Ok(ReturnStmt { expr })
 }
@@ -601,7 +601,7 @@ pub fn parse_call_expr(pair: Pair<Rule>) -> ParseResult<CallExpr> {
     _debug_rule("parse_call_expr", &pair);
     let mut inner = pair.into_inner();
     let id = inner.next().unwrap().as_str().to_string();
-    let args = inner.next().map(|pair| parse_func_args(pair)).transpose()?;
+    let args = inner.next().map(parse_func_args).transpose()?;
     Ok(CallExpr {
         id,
         args: args.unwrap_or(Vec::new()),
@@ -814,7 +814,7 @@ fn parse_hex_float(s: &str) -> Result<f64, ParseIntError> {
     let sign = if s.starts_with('-') { -1.0 } else { 1.0 };
 
     let without_prefix = s
-        .trim_start_matches("-")
+        .trim_start_matches('-')
         .trim_start_matches("0x")
         .trim_start_matches("0X");
     let mut parts = without_prefix.splitn(2, |c| c == 'p' || c == 'P');

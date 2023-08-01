@@ -94,7 +94,7 @@ impl Builder {
     }
 
     pub fn build_type(&mut self, type_: &Type) -> Type {
-        return type_.clone();
+        type_.clone()
     }
 
     pub fn build_global_variable(&mut self, var_decl: &VarDecl) {
@@ -149,7 +149,7 @@ impl Builder {
                         // let iv_ = array_init_val.0.get(i);
                         let iv_ = deque.front().cloned();
                         if let Some(iv) = iv_ {
-                            let ty = Type::Array(ArrayType::Constant(type_.clone())).into();
+                            let ty = Type::Array(ArrayType::Constant(type_.clone()));
                             let gep_id = self.module.spawn_gep_inst(
                                 ty,
                                 elem_type.clone(),
@@ -163,7 +163,7 @@ impl Builder {
                                     let mut sub_deque = VecDeque::from(array_iv.0.clone());
                                     self.build_array_init_val(gep_id, &mut sub_deque, const_at);
                                 }
-                                InitVal::Expr(expr) => {
+                                InitVal::Expr(_expr) => {
                                     self.build_array_init_val(gep_id, deque, const_at);
                                 }
                             }
@@ -178,7 +178,7 @@ impl Builder {
                     let iv_ = deque.pop_front();
                     if let Some(iv) = iv_ {
                         let init_val = self.build_init_val(&iv, elem_type);
-                        let ty = Type::Array(ArrayType::Constant(type_.clone())).into();
+                        let ty = Type::Array(ArrayType::Constant(type_.clone()));
                         let gep_id = self.module.spawn_gep_inst(
                             ty,
                             elem_type.clone(),
@@ -212,7 +212,7 @@ impl Builder {
                                     let mut sub_deque = VecDeque::from(array_iv.0.clone());
                                     self.build_global_array_init_val(&mut sub_deque, const_at)
                                 }
-                                InitVal::Expr(expr) => {
+                                InitVal::Expr(_expr) => {
                                     self.build_global_array_init_val(deque, const_at)
                                 }
                             })
@@ -232,7 +232,7 @@ impl Builder {
         }
         ConstValue::Array(ConstArray {
             ty: Type::Array(ArrayType::Constant(type_.clone())),
-            values: values,
+            values,
         })
     }
 
@@ -270,10 +270,10 @@ impl Builder {
         }
     }
 
-    pub fn build_init_val(&mut self, init_val: &InitVal, type_: &Type) -> ValueId {
+    pub fn build_init_val(&mut self, init_val: &InitVal, _type_: &Type) -> ValueId {
         match init_val {
             InitVal::Expr(expr) => self.build_expr(expr, false),
-            InitVal::Array(array_init_val) => {
+            InitVal::Array(_array_init_val) => {
                 unimplemented!()
                 // let ty = Type::Array(ArrayType::Constant(ConstantArrayType {
                 //     element_type: Box::new(type_.clone()), // Replace with the correct element type
@@ -372,7 +372,7 @@ impl Builder {
             let cond_value = self.build_expr(&do_while_stmt.cond, false);
             self.module.spawn_br_inst(cond_value, body_bb, end_bb);
 
-            self.module.cur_func_mut().bbs.append(end_bb.clone());
+            self.module.cur_func_mut().bbs.append(end_bb);
 
             self.module.set_insert_point(end_bb);
         }
@@ -384,7 +384,7 @@ impl Builder {
             panic!("break statement not in loop");
         }
 
-        let (break_bb, _) = self.loop_stack.last().unwrap().clone();
+        let (break_bb, _) = *self.loop_stack.last().unwrap();
         self.module.spawn_jump_inst(break_bb);
     }
 
@@ -393,7 +393,7 @@ impl Builder {
             panic!("continue statement not in loop");
         }
 
-        let (_, cont_bb) = self.loop_stack.last().unwrap().clone();
+        let (_, cont_bb) = *self.loop_stack.last().unwrap();
         self.module.spawn_jump_inst(cont_bb);
     }
 
@@ -427,7 +427,7 @@ impl Builder {
                         }
                         _ => {
                             let init_val_id = self.build_init_val(init_val, &decl.type_);
-                            let store_id = self.module.spawn_store_inst(alloca_id, init_val_id);
+                            let _store_id = self.module.spawn_store_inst(alloca_id, init_val_id);
                             self.module
                                 .sym2def
                                 .insert(decl.sema_ref.as_ref().unwrap().symbol_id, alloca_id);
@@ -461,10 +461,10 @@ impl Builder {
 
             if infix_expr.op == InfixOp::LogicAnd {
                 next_bb = self.module.spawn_basic_block();
-                self.visit_cond_expr(&infix_expr.lhs, next_bb.clone(), false_bb);
+                self.visit_cond_expr(&infix_expr.lhs, next_bb, false_bb);
             } else if infix_expr.op == InfixOp::LogicOr {
                 next_bb = self.module.spawn_basic_block();
-                self.visit_cond_expr(&infix_expr.lhs, true_bb, next_bb.clone());
+                self.visit_cond_expr(&infix_expr.lhs, true_bb, next_bb);
             } else {
                 unreachable!();
             }
@@ -472,7 +472,7 @@ impl Builder {
             self.module.set_insert_point(next_bb);
             self.visit_cond_expr(&infix_expr.rhs, true_bb, false_bb);
         } else {
-            let cond_val_id = self.build_expr(&cond_expr, false);
+            let cond_val_id = self.build_expr(cond_expr, false);
             println!("cond_val_id: {}", self.module.inspect_value(cond_val_id));
             // 如果不是 bool(i1) 类型，则生成一个比较指令
             let ty = self.module.get_value(cond_val_id).ty();
@@ -493,21 +493,21 @@ impl Builder {
         let false_bb = if if_stmt.else_stmt.is_some() {
             self.module.spawn_basic_block()
         } else {
-            exit_bb.clone()
+            exit_bb
         };
 
-        self.visit_cond_expr(&if_stmt.cond, true_bb.clone(), false_bb.clone());
+        self.visit_cond_expr(&if_stmt.cond, true_bb, false_bb);
 
         self.module.set_insert_point(true_bb);
         self.build_statement(&if_stmt.then_stmt);
-        self.module.spawn_jump_inst(exit_bb.clone());
+        self.module.spawn_jump_inst(exit_bb);
 
         if let Some(else_stmt) = &if_stmt.else_stmt {
             self.module.set_insert_point(false_bb);
             self.build_statement(else_stmt);
-            self.module.spawn_jump_inst(exit_bb.clone());
+            self.module.spawn_jump_inst(exit_bb);
         }
-        self.module.cur_func_mut().bbs.append(exit_bb.clone());
+        self.module.cur_func_mut().bbs.append(exit_bb);
         self.module.set_insert_point(exit_bb);
     }
     /*
@@ -556,7 +556,7 @@ impl Builder {
             self.build_statement(&while_stmt.body);
             self.module.spawn_jump_inst(cond_bb);
 
-            self.module.cur_func_mut().bbs.append(end_bb.clone());
+            self.module.cur_func_mut().bbs.append(end_bb);
 
             self.module.set_insert_point(end_bb);
         }
@@ -596,7 +596,7 @@ impl Builder {
     }
      */
     pub fn build_for_statement(&mut self, for_stmt: &ForStmt) {
-        let init_value = for_stmt
+        let _init_value = for_stmt
             .init
             .as_ref()
             .map(|init| self.build_expr(init, false));
@@ -756,16 +756,13 @@ impl Builder {
             Expr::Primary(primary_expr) => match primary_expr {
                 PrimaryExpr::Group(expr) => self.build_expr(expr, false),
                 PrimaryExpr::Call(call_expr) => {
-                    let func_id = self.module.functions.get(&call_expr.id).unwrap().clone();
+                    let func_id = *self.module.functions.get(&call_expr.id).unwrap();
                     let args = call_expr
-                        .args
-                        .iter()
-                        .map(|arg| arg.clone()) // 克隆 arg，以便在迭代之外使用
-                        .collect::<Vec<_>>(); // 将结果收集到一个临时的 Vec 中
+                        .args.to_vec(); // 将结果收集到一个临时的 Vec 中
 
                     let args = args.into_iter().map(|arg| self.build_expr(&arg, false)); // 使用临时 Vec 构建表达式，避免多次借用 self
                     let args = args.collect::<Vec<_>>(); // 将结果收集到一个临时的 Vec 中
-                    self.module.spawn_call_inst(func_id.clone(), args)
+                    self.module.spawn_call_inst(func_id, args)
                 }
                 PrimaryExpr::Ident(ident_expr) => {
                     /*
@@ -783,7 +780,7 @@ impl Builder {
                     let _symbol = self.module.syms.resolve_symbol_by_id(sym_id);
                     // log::debug!("sym_id: {:?}, _symbol: {:?}", sym_id, _symbol);
                     // log::debug!("sym2def: {:?}", self.module.sym2def);
-                    let var_val_id = self.module.sym2def.get(&sym_id).unwrap().clone();
+                    let var_val_id = *self.module.sym2def.get(&sym_id).unwrap();
                     // 例如接下来要对变量进行赋值，那么就不需要 load。
                     // 如果接下来要使用变量进行运算等，则需要 load。
                     if is_lval {

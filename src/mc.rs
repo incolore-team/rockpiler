@@ -139,14 +139,14 @@ impl AsmModule {
         if let Imm::Float(fimm) = imm {
             let tmp = IntReg::new(RegType::Ip);
             ret.extend(self.load_imm(tmp.clone().into(), &Imm::Int(fimm.cast_to_raw_int().into())));
-            let inst: AsmInst = VMovInst::new(VMovType::A2S, reg, tmp.clone().into()).into();
+            let inst: AsmInst = VMovInst::new(VMovType::A2S, reg, tmp.into()).into();
             let inst_id = self.values.alloc(AsmValue::Inst(inst));
             ret.push(inst_id);
         } else if let Imm::Label(_) | Imm::Int(_) = imm {
             if imm.highest_one_bit() < 65535 {
                 // ret.push(MovInst::new(MovType::Movw, reg.clone(), imm.clone().into()).into());
                 let inst: AsmInst =
-                    MovInst::new(MovType::Movw, reg.clone(), imm.clone().into(), None).into();
+                    MovInst::new(MovType::Movw, reg, imm.clone().into(), None).into();
                 let inst_id = self.values.alloc(AsmValue::Inst(inst));
                 ret.push(inst_id);
             } else {
@@ -157,7 +157,7 @@ impl AsmModule {
                 ret.push(inst_id);
                 // ret.push(MovInst::new(MovType::Movt, reg.clone(), imm.highest_word().into()).into(),);
                 let inst: AsmInst =
-                    MovInst::new(MovType::Movt, reg.clone(), imm.highest_word().into(), None)
+                    MovInst::new(MovType::Movt, reg, imm.highest_word().into(), None)
                         .into();
                 let inst_id = self.values.alloc(AsmValue::Inst(inst));
                 ret.push(inst_id);
@@ -537,7 +537,7 @@ impl IntReg {
 
 impl From<i64> for IntReg {
     fn from(val: i64) -> Self {
-        assert!(val >= 0 && val < 16);
+        assert!((0..16).contains(&val));
         Self {
             ty: RegType::from(val),
             is_float: false,
@@ -568,7 +568,7 @@ pub enum RegType {
 impl RegType {
     pub fn is_callee_saved(&self) -> bool {
         let idx: i64 = (*self).into();
-        idx >= 4 && idx <= 10
+        (4..=10).contains(&idx)
     }
 }
 impl From<RegType> for i64 {
@@ -643,7 +643,7 @@ impl VfpReg {
 
 impl From<i64> for VfpReg {
     fn from(val: i64) -> Self {
-        assert!(val >= 0 && val < 32);
+        assert!((0..32).contains(&val));
         Self {
             index: val,
             use_as_double: false,
@@ -694,7 +694,7 @@ impl ImmTrait for FloatImm {
     fn lowest_dword(&self) -> Imm {
         let raw = self.cast_to_raw_int();
         Imm::Int(IntImm {
-            value: raw & 0xffff_ffff,
+            value: raw,
         })
     }
 
@@ -754,7 +754,7 @@ impl ImmTrait for IntImm {
 
     fn lowest_dword(&self) -> Imm {
         Imm::Int(IntImm {
-            value: self.value & 0xffff_ffff,
+            value: self.value,
         })
     }
 
@@ -796,39 +796,39 @@ impl LabelImm {
 
 impl ImmTrait for LabelImm {
     fn highest_one_bit(&self) -> u32 {
-        return 1 << 31;
+        1 << 31
     }
 
     fn lowest_dword(&self) -> Imm {
-        return Imm::Label(LabelImm {
+        Imm::Label(LabelImm {
             state: LabelImmState::Low,
             label: self.label.clone(),
             is_float: false,
-        });
+        })
     }
 
     fn highest_dword(&self) -> Imm {
-        return Imm::Label(LabelImm {
+        Imm::Label(LabelImm {
             state: LabelImmState::High,
             label: self.label.clone(),
             is_float: false,
-        });
+        })
     }
 
     fn lowest_word(&self) -> Imm {
-        return Imm::Label(LabelImm {
+        Imm::Label(LabelImm {
             state: LabelImmState::Low,
             label: self.label.clone(),
             is_float: false,
-        });
+        })
     }
 
     fn highest_word(&self) -> Imm {
-        return Imm::Label(LabelImm {
+        Imm::Label(LabelImm {
             state: LabelImmState::High,
             label: self.label.clone(),
             is_float: false,
-        });
+        })
     }
 }
 
@@ -884,10 +884,10 @@ impl CallConv {
     }
 }
 
-use core::fmt;
+
 /// ARM ABI calling convention
 /// https://learn.microsoft.com/zh-cn/cpp/build/overview-of-arm-abi-conventions?view=msvc-170
-use std::{cmp, collections::LinkedList, default, hash};
+use std::{cmp, default, hash};
 
 use crate::{
     ast::Type,
@@ -950,7 +950,7 @@ impl BaseCallConv {
     }
 
     pub fn add_param(&mut self, param_info: ParamInfo) -> AsmOperand {
-        let mut ret;
+        let ret;
         let size = if !param_info.is_pointer && param_info.base_type == AsmTypeTag::DOUBLE {
             self.ncrn = (self.ncrn + 1) / 2 * 2;
             if self.ncrn >= 4 {
@@ -1049,32 +1049,30 @@ impl VfpCallConv {
                     }));
                     self.nsaa += size;
                 }
+            } else if (self.ncrn + (size / 4)) <= 4 {
+                // 寄存器能分配下
+                let result = AsmOperand::IntReg(IntReg::from(self.ncrn));
+                self.call_params.push(result.clone());
+                self.self_args.push(result);
+                self.ncrn += size / 4;
             } else {
-                if (self.ncrn + (size / 4)) <= 4 {
-                    // 寄存器能分配下
-                    let result = AsmOperand::IntReg(IntReg::from(self.ncrn));
-                    self.call_params.push(result.clone());
-                    self.self_args.push(result);
-                    self.ncrn = self.ncrn + (size / 4);
-                } else {
-                    assert_eq!(self.ncrn, 4);
-                    self.call_params
-                        .push(AsmOperand::StackOperand(StackOperand {
-                            ty: StackOperandType::CallParam,
-                            offset: self.nsaa,
-                        }));
-                    self.self_args.push(AsmOperand::StackOperand(StackOperand {
-                        ty: StackOperandType::SelfArg,
-                        offset: self.nsaa + 8,
+                assert_eq!(self.ncrn, 4);
+                self.call_params
+                    .push(AsmOperand::StackOperand(StackOperand {
+                        ty: StackOperandType::CallParam,
+                        offset: self.nsaa,
                     }));
-                    self.nsaa += size;
-                }
+                self.self_args.push(AsmOperand::StackOperand(StackOperand {
+                    ty: StackOperandType::SelfArg,
+                    offset: self.nsaa + 8,
+                }));
+                self.nsaa += size;
             }
         }
         self
     }
 
-    pub fn add_param(&mut self, param_info: ParamInfo) -> AsmOperand {
+    pub fn add_param(&mut self, _param_info: ParamInfo) -> AsmOperand {
         unimplemented!()
     }
 }

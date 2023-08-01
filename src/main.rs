@@ -9,7 +9,7 @@ fn main() -> ExitCode {
     let args = Args::parse();
     debug!("args: {:?}", args);
     driver::drive(args);
-    return ExitCode::SUCCESS;
+    ExitCode::SUCCESS
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn test_all() {
         let file_stem = path.file_stem().unwrap().to_str().unwrap();
         let output_path = format!("{}{}.ll", dir, file_stem);
         let input_path = format!("{}{}.sy", dir, file_stem);
-        let args = Args::parse_from(&["rockc", &input_path, "-o", &output_path]);
+        let args = Args::parse_from(["rockc", &input_path, "-o", &output_path]);
         driver::drive(args);
     }
 }
@@ -62,6 +62,6 @@ fn test_single() {
     let file_stem = "04_arr_defn3";
     let output_path = format!("{}{}.ll", dir, file_stem);
     let input_path = format!("{}{}.sy", dir, file_stem);
-    let args = Args::parse_from(&["rockc", &input_path, "-o", &output_path]);
+    let args = Args::parse_from(["rockc", &input_path, "-o", &output_path]);
     driver::drive(args);
 }
