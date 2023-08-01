@@ -1,11 +1,11 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    default,
+
 };
 
 use crate::{
     ast::Type,
-    ir::{AllocaInst, BasicBlockValue, ConstValue, InstValue, Module, Value, ValueId},
+    ir::{ConstValue, InstValue, Module, Value, ValueId},
 };
 
 pub fn run(module: &mut Module) {

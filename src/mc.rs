@@ -491,7 +491,7 @@ pub struct StackOperand {
     pub offset: i64,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum StackOperandType {
     Local,
     Spill,
@@ -499,7 +499,7 @@ pub enum StackOperandType {
     SelfArg,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub struct VirtReg {
     pub index: i32,
     pub is_float: bool,
@@ -652,7 +652,7 @@ impl From<i64> for VfpReg {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FloatImm {
     pub value: f32,
     pub is_float: bool,
@@ -663,7 +663,13 @@ impl FloatImm {
         unsafe { std::mem::transmute(self.value) }
     }
 }
+impl cmp::Eq for FloatImm {}
 
+impl hash::Hash for FloatImm {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.cast_to_raw_int().hash(state);
+    }
+}
 impl From<f32> for FloatImm {
     fn from(val: f32) -> Self {
         Self {
@@ -826,7 +832,7 @@ impl ImmTrait for LabelImm {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum LabelImmState {
     Label,
     High,
@@ -881,7 +887,7 @@ impl CallConv {
 use core::fmt;
 /// ARM ABI calling convention
 /// https://learn.microsoft.com/zh-cn/cpp/build/overview-of-arm-abi-conventions?view=msvc-170
-use std::{collections::LinkedList, default};
+use std::{cmp, collections::LinkedList, default, hash};
 
 use crate::{
     ast::Type,

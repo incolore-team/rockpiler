@@ -157,7 +157,6 @@ pub enum AsmInst {
     Br(BrInst),
     BX(BXInst),
     Call(CallInst),
-    TailCall(TailCallInst),
     CMP(CMPInst),
     FBinOp(FBinOpInst),
     FCMP(FCMPInst),
@@ -253,20 +252,6 @@ impl AsmInst {
     pub fn as_call_mut(&mut self) -> Option<&mut CallInst> {
         match self {
             AsmInst::Call(inst) => Some(inst),
-            _ => None,
-        }
-    }
-
-    pub fn as_tail_call(&self) -> Option<&TailCallInst> {
-        match self {
-            AsmInst::TailCall(inst) => Some(inst),
-            _ => None,
-        }
-    }
-
-    pub fn as_tail_call_mut(&mut self) -> Option<&mut TailCallInst> {
-        match self {
-            AsmInst::TailCall(inst) => Some(inst),
             _ => None,
         }
     }
@@ -474,7 +459,6 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.get_defs(),
             AsmInst::Prologue(inst) => inst.get_defs(),
             AsmInst::RetInst(inst) => inst.get_defs(),
-            AsmInst::TailCall(inst) => inst.get_defs(),
         }
     }
 
@@ -497,7 +481,6 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.get_uses(),
             AsmInst::Prologue(inst) => inst.get_uses(),
             AsmInst::RetInst(inst) => inst.get_uses(),
-            AsmInst::TailCall(inst) => inst.get_uses(),
         }
     }
 
@@ -520,7 +503,6 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.get_uses_mut(),
             AsmInst::Prologue(inst) => inst.get_uses_mut(),
             AsmInst::RetInst(inst) => inst.get_uses_mut(),
-            AsmInst::TailCall(inst) => inst.get_uses_mut(),
         }
     }
 
@@ -543,7 +525,6 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.get_defs_mut(),
             AsmInst::Prologue(inst) => inst.get_defs_mut(),
             AsmInst::RetInst(inst) => inst.get_defs_mut(),
-            AsmInst::TailCall(inst) => inst.get_defs_mut(),
         }
     }
 
@@ -566,7 +547,6 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.set_uses(uses),
             AsmInst::Prologue(inst) => inst.set_uses(uses),
             AsmInst::RetInst(inst) => inst.set_uses(uses),
-            AsmInst::TailCall(inst) => inst.set_uses(uses),
         }
     }
 
@@ -589,7 +569,6 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VSTR(inst) => inst.set_defs(defs),
             AsmInst::Prologue(inst) => inst.set_defs(defs),
             AsmInst::RetInst(inst) => inst.set_defs(defs),
-            AsmInst::TailCall(inst) => inst.set_defs(defs),
         }
     }
 }
@@ -608,7 +587,6 @@ impl_asm_from_trait!(BinOp, BinOpInst);
 impl_asm_from_trait!(Br, BrInst);
 impl_asm_from_trait!(BX, BXInst);
 impl_asm_from_trait!(Call, CallInst);
-impl_asm_from_trait!(Call, TailCallInst);
 impl_asm_from_trait!(CMP, CMPInst);
 impl_asm_from_trait!(FBinOp, FBinOpInst);
 impl_asm_from_trait!(FCMP, FCMPInst);
@@ -834,7 +812,6 @@ pub struct CallInst {
 }
 
 impl_asm_inst_trait!(CallInst);
-impl_asm_inst_trait!(TailCallInst);
 
 impl CallInst {
     pub fn new(label: LabelImm, cc: CallConv) -> Self {
@@ -850,27 +827,6 @@ impl CallInst {
     pub fn new_tail_call(label: LabelImm, cc: CallConv) -> Self {
         Self {
             tail_call: true,
-            label,
-            cc,
-            oprs: AsmOperandComponent::new(vec![], vec![]),
-            constraints: ConstraintsComponent::default(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct TailCallInst {
-    /// jump target
-    pub label: LabelImm,
-    pub oprs: AsmOperandComponent,
-    pub cc: CallConv,
-    /// used to bind args to calling convention registers
-    pub constraints: ConstraintsComponent,
-}
-
-impl TailCallInst {
-    pub fn new(label: LabelImm, cc: CallConv) -> Self {
-        Self {
             label,
             cc,
             oprs: AsmOperandComponent::new(vec![], vec![]),

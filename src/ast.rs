@@ -517,6 +517,7 @@ pub struct ConstantArrayType {
     pub element_type: Box<Type>,
     pub size: usize,
     pub size_info: Option<Box<Expr>>,
+    pub dims: Option<Vec<usize>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

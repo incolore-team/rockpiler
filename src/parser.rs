@@ -201,6 +201,7 @@ pub fn parse_var_def(pair: Pair<Rule>, type_: &Type, is_const: bool) -> ParseRes
             element_type: Box::new(var_type),
             size: 0,
             size_info: Some(const_expr.clone()),
+            dims: None,
         }));
     }
 

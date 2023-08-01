@@ -123,7 +123,7 @@ impl<'a> Printer<'a> {
     }
 
     pub fn print_gep_inst(&mut self, val_id: &ValueId, inst: &GetElementPtrInst) {
-        let ptr_val = Value::resolve(inst.pointer, self.module);
+        let ptr_val = Value::resolve(inst.ptr, self.module);
         let index_vals: Vec<_> = inst
             .indices
             .iter()
@@ -134,7 +134,7 @@ impl<'a> Printer<'a> {
             "{} = getelementptr {}, ptr {}",
             self.resolve_name(&val_id),
             self.format_type(&inst.ty),
-            self.format_value(&inst.pointer, ptr_val)
+            self.format_value(&inst.ptr, ptr_val)
         );
         for i in 0..index_vals.len() {
             print!(

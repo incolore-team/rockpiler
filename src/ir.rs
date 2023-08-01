@@ -1,4 +1,4 @@
-use std::collections::{HashMap, LinkedList};
+use std::collections::HashMap;
 
 use crate::{
     ast::*,
@@ -534,7 +534,7 @@ impl Module {
         let gep = GetElementPtrInst {
             ty,
             base,
-            pointer,
+            ptr: pointer,
             indices: indices.clone(),
         };
         let gep_id = self.alloc_value(gep.into());
@@ -1095,6 +1095,29 @@ pub enum ConstValue {
     Array(ConstArray),
 }
 
+impl ConstValue {
+    pub fn as_int(&self) -> Option<&ConstInt> {
+        match self {
+            ConstValue::Int(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn as_float(&self) -> Option<&ConstFloat> {
+        match self {
+            ConstValue::Float(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&ConstArray> {
+        match self {
+            ConstValue::Array(c) => Some(c),
+            _ => None,
+        }
+    }
+}
+
 impl Into<Value> for ConstValue {
     fn into(self) -> Value {
         Value::Const(self)
@@ -1317,7 +1340,7 @@ impl_replace_operands!(StoreInst, value, ptr);
 pub struct GetElementPtrInst {
     pub ty: Type,
     pub base: Type,
-    pub pointer: ValueId,
+    pub ptr: ValueId,
     pub indices: Vec<ValueId>,
 }
 
@@ -1329,8 +1352,8 @@ impl Into<Value> for GetElementPtrInst {
 
 impl GetElementPtrInst {
     pub fn replace_operands(&mut self, old_value_id: ValueId, new_value_id: ValueId) {
-        if self.pointer == old_value_id {
-            self.pointer = new_value_id;
+        if self.ptr == old_value_id {
+            self.ptr = new_value_id;
         }
         for index in &mut self.indices {
             if *index == old_value_id {
