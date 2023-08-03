@@ -368,7 +368,7 @@ impl McBuilder<'_> {
 
     fn get_label(&mut self, asm_bb_id: AsmValueId) -> String {
         let asm_bb = self.module.get_bb(asm_bb_id);
-        
+
         asm_bb.name.clone()
     }
 
@@ -455,12 +455,9 @@ impl McBuilder<'_> {
                     .module
                     .alloc_value(AsmValue::Inst(AsmInst::CMP(cmp_inst)));
                 let insts = self.expand_cmp_imm(cmp_inst_id);
-                let mut next_bb = None;
-                {
-                    let abb = self.module.get_bb_mut(asm_bb_id);
-                    abb.insts.extend(insts);
-                    next_bb = abb.next;
-                }
+                let abb = self.module.get_bb_mut(asm_bb_id);
+                abb.insts.extend(insts);
+                let next_bb = abb.next;
                 let then_bb = *self.bb_map.get(&br_inst.then_bb).unwrap();
                 let else_bb = *self.bb_map.get(&br_inst.else_bb).unwrap();
 
@@ -993,7 +990,6 @@ impl McBuilder<'_> {
                 asm_func_id,
                 asm_bb_id,
             );
-            offset = 0;
         }
 
         self.vreg_map
@@ -1436,7 +1432,6 @@ impl McBuilder<'_> {
 
                         insts.push(id);
                     }
-                    _ => panic!("Unsupported operation"),
                 }
                 new_ops.push(tmp2);
             }

@@ -1,5 +1,3 @@
-
-
 use crate::{mc::*, mc_inst::*};
 
 pub fn print(module: &mut AsmModule) {
@@ -133,7 +131,6 @@ impl ToArm for LabelImm {
             LabelImmState::High => format!("#:upper16:{}", self.label),
             LabelImmState::Label => self.label.to_string(),
             LabelImmState::Low => format!("#:lower16:{}", self.label),
-            _ => String::new(),
         }
     }
 }
@@ -151,9 +148,6 @@ impl ToArm for StackOperand {
             }
             StackOperandType::SelfArg => {
                 base = RegType::Fp;
-            }
-            _ => {
-                panic!("Unsupported operation");
             }
         }
         format!("{}, #{}", base.to_arm(module), to_signed_hex_string(offset))
@@ -216,11 +210,7 @@ impl ToArm for VfpReg {
 }
 impl ToArm for BrInst {
     fn to_arm(&self, _module: &mut AsmModule) -> String {
-        format!(
-            "B{}\t{}",
-            self.cond,
-            self.target_label.clone().unwrap()
-        )
+        format!("B{}\t{}", self.cond, self.target_label.clone().unwrap())
     }
 }
 impl ToArm for BXInst {

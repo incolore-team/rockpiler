@@ -206,7 +206,7 @@ impl AsmModule {
                     || imm.highest_one_bit() >= 255
                 {
                     assert!(!ip_used);
-                    ip_used = true;
+                    // ip_used = true;
                     let tmp = AsmOperand::IntReg(IntReg::new(RegType::Ip));
                     ret.extend(self.load_imm(tmp.clone(), &imm));
                     op2 = tmp;
@@ -270,8 +270,6 @@ pub struct StackState {
     pub local_size: i64,
     max_arg_size: i64,
 }
-
-
 
 impl StackState {
     // Returns offset relative to BP, use as: bp-offset
