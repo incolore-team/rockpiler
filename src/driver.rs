@@ -1,11 +1,13 @@
 use log::trace;
 
 use crate::{
+    arm_printer,
     cli::Args,
+    ir_builder,
     ir_pass::{inst_namer, mem2reg},
-    ir_printer,
+    ir_printer, mc_builder,
     scope::SymbolTable,
-    sema::ToSemaTrait, ir_builder, mc_builder,
+    sema::ToSemaTrait,
 };
 
 pub fn drive(args: Args) {
@@ -37,7 +39,8 @@ pub fn drive(args: Args) {
 
         trace!("================== SSA Module as LLVM IR ==================");
         ir_printer::print(&mut module);
-        let _arm_module = mc_builder::build(&mut module);
-        
+        trace!("================== Arm Assembly Module ==================");
+        let mut arm_module = mc_builder::build(&mut module);
+        arm_printer::print(&mut arm_module);
     }
 }

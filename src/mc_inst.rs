@@ -1,4 +1,5 @@
 use core::fmt;
+use std::vec;
 
 use crate::{
     ast::InfixOp,
@@ -595,13 +596,15 @@ impl_asm_from_trait!(Ret, RetInst);
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RetInst {
     pub func: AsmValueId,
+    pub oprs: AsmOperandComponent,
     pub constraints: ConstraintsComponent,
 }
-impl_asm_inst_trait_no_oprs!(RetInst);
+impl_asm_inst_trait!(RetInst);
 impl RetInst {
     pub fn new(func: AsmValueId) -> Self {
         Self {
             func,
+            oprs: AsmOperandComponent::new(vec![], vec![]),
             constraints: ConstraintsComponent::default(),
         }
     }
@@ -1046,10 +1049,6 @@ impl BrInst {
             target_label: Some(target_label),
         }
     }
-}
-
-pub struct BrInstBuilder {
-    inst: BrInst,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

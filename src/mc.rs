@@ -223,7 +223,7 @@ impl AsmModule {
 
 pub struct AsmFunction {
     pub name: String, // label
-    pub entry: AsmValueId,
+    pub entry: Option<AsmValueId>,
     pub bbs: Vec<AsmValueId>,
     pub stack_state: StackState,
 }
@@ -263,7 +263,6 @@ impl AsmTypeTag {
         }
     }
 }
-
 pub struct StackState {
     pub alloca_finished: bool,
     pub spill_size: i64,
@@ -271,16 +270,18 @@ pub struct StackState {
     max_arg_size: i64,
 }
 
-impl StackState {
-    pub fn new() -> Self {
-        StackState {
+impl Default for StackState {
+    fn default() -> Self {
+        Self {
             alloca_finished: false,
-            local_size: 0,
             spill_size: 0,
+            local_size: 0,
             max_arg_size: 0,
         }
     }
+}
 
+impl StackState {
     // Returns offset relative to BP, use as: bp-offset
     pub fn alloc_local(&mut self, size: i64) -> i64 {
         if self.alloca_finished {
@@ -731,7 +732,7 @@ impl ImmTrait for FloatImm {
 
     fn highest_dword(&self) -> Imm {
         let raw = self.cast_to_raw_int();
-        Imm::Int(IntImm { value: raw >> 32 })
+        Imm::Int(IntImm { value: 0 })
     }
 
     fn lowest_word(&self) -> Imm {
@@ -788,9 +789,7 @@ impl ImmTrait for IntImm {
     }
 
     fn highest_dword(&self) -> Imm {
-        Imm::Int(IntImm {
-            value: self.value >> 32,
-        })
+        Imm::Int(IntImm { value: 0 })
     }
 
     fn lowest_word(&self) -> Imm {

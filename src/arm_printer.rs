@@ -82,9 +82,9 @@ impl ToArm for BinOpInst {
 impl ToArm for BinaryOp {
     fn to_arm(&self, module: &mut AsmModule) -> String {
         match self {
-            BinaryOp::Add => "ADD".to_string(),
-            BinaryOp::Sub => "SUB".to_string(),
-            BinaryOp::Mul => "MUL".to_string(),
+            BinaryOp::Add => "ADD ".to_string(),
+            BinaryOp::Sub => "SUB ".to_string(),
+            BinaryOp::Mul => "MUL ".to_string(),
             BinaryOp::Div => "SDIV".to_string(),
             BinaryOp::Mod => "ERR".to_string(),
             BinaryOp::LogAnd => "ERR".to_string(),
@@ -285,7 +285,7 @@ impl ToArm for FCMPInst {
 impl ToArm for LDRInst {
     fn to_arm(&self, module: &mut AsmModule) -> String {
         format!(
-            "LDR\t{},[{}]",
+            "LDR \t{}, [{}]",
             self.get_defs()[0].to_arm(module),
             self.get_uses()[0].to_arm(module),
         )
@@ -304,7 +304,7 @@ impl ToArm for MovInst {
 impl ToArm for STRInst {
     fn to_arm(&self, module: &mut AsmModule) -> String {
         format!(
-            "STR\t{},[{}]",
+            "STR\t{}, [{}]",
             self.get_uses()[0].to_arm(module),
             self.get_uses()[1].to_arm(module),
         )
@@ -323,7 +323,7 @@ impl ToArm for VCVTInst {
 impl ToArm for VLDRInst {
     fn to_arm(&self, module: &mut AsmModule) -> String {
         format!(
-            "VLDR\t{},[{}]",
+            "VLDR\t{}, [{}]",
             self.get_defs()[0].to_arm(module),
             self.get_uses()[0].to_arm(module),
         )
@@ -346,7 +346,7 @@ impl ToArm for VMRSInst {
 impl ToArm for VSTRInst {
     fn to_arm(&self, module: &mut AsmModule) -> String {
         format!(
-            "VSTR\t{},[{}]",
+            "VSTR\t{}, [{}]",
             self.get_uses()[0].to_arm(module),
             self.get_uses()[1].to_arm(module),
         )
@@ -382,6 +382,6 @@ impl ToArm for RetInst {
         } else {
             String::from("ret void")
         };
-        format!("mov\tsp, fp\t@ {}\n\tpop\t{{fp, lr}}\n\tbx\tlr", comment)
+        format!("MOV\tsp, fp\t@ {}\n\tPOP\t{{fp, lr}}\n\tBX\tlr", comment)
     }
 }

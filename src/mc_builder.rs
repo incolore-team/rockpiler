@@ -39,18 +39,26 @@ struct McBuilder<'a> {
     vreg_idx: i32,
 }
 
-impl Into<AsmGlobalVariable> for GlobalVariableValue {
-    fn into(self) -> AsmGlobalVariable {
-        todo!()
+impl From<GlobalVariableValue> for AsmGlobalVariable {
+    fn from(value: GlobalVariableValue) -> Self {
+        AsmGlobalVariable {
+            base: (value.ty.base_type().clone()).into(),
+            size: value.ty.size(),
+            imm: LabelImm::new(value.name),
+        }
     }
 }
 
-impl Into<AsmFunction> for FunctionValue {
-    fn into(self) -> AsmFunction {
-        todo!()
+impl From<FunctionValue> for AsmFunction {
+    fn from(value: FunctionValue) -> Self {
+        Self {
+            name: value.name,
+            entry: None,
+            bbs: vec![],
+            stack_state: StackState::default(),
+        }
     }
 }
-
 impl From<ConstValue> for Imm {
     fn from(value: ConstValue) -> Self {
         match value {
@@ -121,6 +129,7 @@ impl McBuilder<'_> {
             } else {
                 self.module.globals.push(val_id);
             }
+            self.gv_map.insert(*id, val_id);
         }
     }
 
@@ -132,9 +141,15 @@ impl McBuilder<'_> {
 
     fn build_function(&mut self, func_id: &ValueId) {
         let ssa_func = self.ir_module.get_func(*func_id);
+        if ssa_func.is_external {
+            return;
+        }
         let asm_func = ssa_func.clone().into();
         let asm_func_id = self.module.alloc_value(AsmValue::Function(asm_func));
+        self.func_map.insert(*func_id, asm_func_id);
+        self.func_map_rev.insert(asm_func_id, *func_id);
         self.module.funcs.push(asm_func_id);
+        self.module.set_cur_func(asm_func_id);
 
         let mut prev_asm_bb_id = None;
         for (_name, block_id) in &ssa_func.bbs.bbs.clone() {
@@ -158,6 +173,9 @@ impl McBuilder<'_> {
             self.bb_map.insert(*block_id, asm_block_id);
         }
         // prologue
+        let asm_func = self.module.get_func_mut(asm_func_id);
+        let first_bb_id = asm_func.bbs[0];
+        asm_func.entry = Some(first_bb_id);
 
         let prologue = PrologueInst::new(asm_func_id);
         let prologue_id = self
@@ -165,7 +183,7 @@ impl McBuilder<'_> {
             .alloc_value(AsmValue::Inst(AsmInst::Prologue(prologue)));
 
         let asm_func = self.module.get_func_mut(asm_func_id);
-        let entry_id = asm_func.entry;
+        let entry_id = asm_func.entry.unwrap();
         self.module
             .get_bb_mut(entry_id)
             .insts
@@ -228,6 +246,8 @@ impl McBuilder<'_> {
     }
 
     fn build_block(&mut self, asm_func_id: AsmValueId, ssa_bb_id: ValueId, asm_bb_id: AsmValueId) {
+        self.module.set_cur_bb(asm_bb_id);
+
         let ssa_bb = self.ir_module.get_bb(ssa_bb_id);
         for inst_id in &ssa_bb.insts {
             let inst_value = self.ir_module.get_inst(*inst_id);
@@ -236,8 +256,9 @@ impl McBuilder<'_> {
             }
             if inst_value.is_term() {
                 self.visit_term_inst(asm_func_id, *inst_id, asm_bb_id)
+            } else {
+                self.visit_non_term_inst(asm_func_id, *inst_id, asm_bb_id)
             }
-            self.visit_non_term_inst(asm_func_id, *inst_id, asm_bb_id)
         }
     }
 
@@ -793,7 +814,10 @@ impl McBuilder<'_> {
                 abb.insts.append(&mut insts);
             }
 
-            _ => unimplemented!("Unknown non-terminator instruction"),
+            _ => {
+                println!("{:?}", inst);
+                unimplemented!("Unknown non-terminator instruction")
+            }
         };
     }
     fn process_call_arg(
