@@ -13,7 +13,7 @@ pub struct AsmModule {
     values: id_arena::Arena<AsmValue>,
     pub globals: Vec<AsmValueId>,
     pub bss_globals: Vec<AsmValueId>, // uninitialized globals
-    pub functions: Vec<AsmValueId>,
+    pub funcs: Vec<AsmValueId>,
 
     cur_func: Option<AsmValueId>,
     cur_bb: Option<AsmValueId>,
@@ -157,8 +157,7 @@ impl AsmModule {
                 ret.push(inst_id);
                 // ret.push(MovInst::new(MovType::Movt, reg.clone(), imm.highest_word().into()).into(),);
                 let inst: AsmInst =
-                    MovInst::new(MovType::Movt, reg, imm.highest_word().into(), None)
-                        .into();
+                    MovInst::new(MovType::Movt, reg, imm.highest_word().into(), None).into();
                 let inst_id = self.values.alloc(AsmValue::Inst(inst));
                 ret.push(inst_id);
             }
@@ -186,6 +185,39 @@ impl AsmModule {
 
         let bb = self.get_bb_mut(bb_id);
         bb.insts = cloned_old;
+    }
+
+    pub fn expand_bin_op_ip(&mut self, bin_id: AsmValueId) -> Vec<AsmValueId> {
+        let mut bin_inst = self.get_inst_mut(bin_id).as_bin_op().unwrap().clone();
+        let mut ret = Vec::new();
+        let mut op1 = bin_inst.get_uses()[0].clone();
+        let mut op2 = bin_inst.get_uses()[1].clone();
+        let mut ip_used = false;
+        if let AsmOperand::Imm(imm) = op1.clone() {
+            assert!(!ip_used);
+            ip_used = true;
+            let tmp = AsmOperand::IntReg(IntReg::new(RegType::Ip));
+            ret.extend(self.load_imm(tmp.clone(), &imm));
+            op1 = tmp;
+        }
+        match op2.clone() {
+            AsmOperand::Imm(imm) => {
+                if !matches!(bin_inst.op, mc_inst::BinaryOp::Add | mc_inst::BinaryOp::Sub)
+                    || imm.highest_one_bit() >= 255
+                {
+                    assert!(!ip_used);
+                    ip_used = true;
+                    let tmp = AsmOperand::IntReg(IntReg::new(RegType::Ip));
+                    ret.extend(self.load_imm(tmp.clone(), &imm));
+                    op2 = tmp;
+                }
+            }
+            _ => (),
+        }
+        bin_inst.set_uses(vec![op1, op2]);
+        self.set_inst(bin_id, bin_inst.into());
+        ret.push(bin_id);
+        ret
     }
 }
 
@@ -293,7 +325,7 @@ impl AsmModule {
         Self {
             globals: Vec::new(),
             bss_globals: Vec::new(),
-            functions: Vec::new(),
+            funcs: Vec::new(),
             values: id_arena::Arena::new(),
             cur_func: None,
             cur_bb: None,
@@ -694,9 +726,7 @@ impl ImmTrait for FloatImm {
 
     fn lowest_dword(&self) -> Imm {
         let raw = self.cast_to_raw_int();
-        Imm::Int(IntImm {
-            value: raw,
-        })
+        Imm::Int(IntImm { value: raw })
     }
 
     fn highest_dword(&self) -> Imm {
@@ -754,9 +784,7 @@ impl ImmTrait for IntImm {
     }
 
     fn lowest_dword(&self) -> Imm {
-        Imm::Int(IntImm {
-            value: self.value,
-        })
+        Imm::Int(IntImm { value: self.value })
     }
 
     fn highest_dword(&self) -> Imm {
@@ -885,14 +913,13 @@ impl CallConv {
     }
 }
 
-
 /// ARM ABI calling convention
 /// https://learn.microsoft.com/zh-cn/cpp/build/overview-of-arm-abi-conventions?view=msvc-170
 use std::{cmp, default, hash};
 
 use crate::{
     ast::Type,
-    mc_inst::{AsmInst, MovInst, MovType, VMovInst, VMovType},
+    mc_inst::{self, AsmInst, AsmInstTrait, MovInst, MovType, VMovInst, VMovType},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]

@@ -3,18 +3,16 @@ use core::fmt;
 use crate::{
     ast::InfixOp,
     mc::{
-        AsmOperand, AsmValueId, CallConv, Imm, ImmTrait, LabelImm, RegConstraintMap, StackOperand, VirtReg,
+        AsmOperand, AsmValueId, CallConv, Imm, ImmTrait, LabelImm, RegConstraintMap, StackOperand,
+        VirtReg,
     },
 };
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-#[derive(Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct ConstraintsComponent {
     pub in_constraints: RegConstraintMap,
     pub out_constraints: RegConstraintMap,
 }
-
-
 
 impl ConstraintsComponent {
     pub fn new(in_constraints: RegConstraintMap, out_constraints: RegConstraintMap) -> Self {
@@ -162,7 +160,7 @@ pub enum AsmInst {
     VMRS(VMRSInst),
     VSTR(VSTRInst),
     Prologue(PrologueInst),
-    RetInst(RetInst),
+    Ret(RetInst),
 }
 
 macro_rules! impl_stack_op_inst_trait {
@@ -419,14 +417,14 @@ impl AsmInst {
 
     pub fn as_ret(&self) -> Option<&RetInst> {
         match self {
-            AsmInst::RetInst(inst) => Some(inst),
+            AsmInst::Ret(inst) => Some(inst),
             _ => None,
         }
     }
 
     pub fn as_ret_mut(&mut self) -> Option<&mut RetInst> {
         match self {
-            AsmInst::RetInst(inst) => Some(inst),
+            AsmInst::Ret(inst) => Some(inst),
             _ => None,
         }
     }
@@ -451,7 +449,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VMRS(inst) => inst.get_defs(),
             AsmInst::VSTR(inst) => inst.get_defs(),
             AsmInst::Prologue(inst) => inst.get_defs(),
-            AsmInst::RetInst(inst) => inst.get_defs(),
+            AsmInst::Ret(inst) => inst.get_defs(),
         }
     }
 
@@ -473,7 +471,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VMRS(inst) => inst.get_uses(),
             AsmInst::VSTR(inst) => inst.get_uses(),
             AsmInst::Prologue(inst) => inst.get_uses(),
-            AsmInst::RetInst(inst) => inst.get_uses(),
+            AsmInst::Ret(inst) => inst.get_uses(),
         }
     }
 
@@ -495,7 +493,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VMRS(inst) => inst.get_uses_mut(),
             AsmInst::VSTR(inst) => inst.get_uses_mut(),
             AsmInst::Prologue(inst) => inst.get_uses_mut(),
-            AsmInst::RetInst(inst) => inst.get_uses_mut(),
+            AsmInst::Ret(inst) => inst.get_uses_mut(),
         }
     }
 
@@ -517,7 +515,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VMRS(inst) => inst.get_defs_mut(),
             AsmInst::VSTR(inst) => inst.get_defs_mut(),
             AsmInst::Prologue(inst) => inst.get_defs_mut(),
-            AsmInst::RetInst(inst) => inst.get_defs_mut(),
+            AsmInst::Ret(inst) => inst.get_defs_mut(),
         }
     }
 
@@ -539,7 +537,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VMRS(inst) => inst.set_uses(uses),
             AsmInst::VSTR(inst) => inst.set_uses(uses),
             AsmInst::Prologue(inst) => inst.set_uses(uses),
-            AsmInst::RetInst(inst) => inst.set_uses(uses),
+            AsmInst::Ret(inst) => inst.set_uses(uses),
         }
     }
 
@@ -561,7 +559,7 @@ impl AsmInstTrait for AsmInst {
             AsmInst::VMRS(inst) => inst.set_defs(defs),
             AsmInst::VSTR(inst) => inst.set_defs(defs),
             AsmInst::Prologue(inst) => inst.set_defs(defs),
-            AsmInst::RetInst(inst) => inst.set_defs(defs),
+            AsmInst::Ret(inst) => inst.set_defs(defs),
         }
     }
 }
@@ -592,7 +590,7 @@ impl_asm_from_trait!(VMov, VMovInst);
 impl_asm_from_trait!(VMRS, VMRSInst);
 impl_asm_from_trait!(VSTR, VSTRInst);
 impl_asm_from_trait!(Prologue, PrologueInst);
-impl_asm_from_trait!(RetInst, RetInst);
+impl_asm_from_trait!(Ret, RetInst);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RetInst {
@@ -664,6 +662,15 @@ pub struct VCVTInst {
     pub ty: VCVTType,
     pub oprs: AsmOperandComponent,
 }
+impl ToString for VCVTType {
+    fn to_string(&self) -> String {
+        match self {
+            VCVTType::F2I => "VCVT.F32.S32".to_string(),
+            VCVTType::I2F => "VCVT.S32.F32".to_string(),
+            VCVTType::F2D => "VCVT.F32.F64".to_string(),
+        }
+    }
+}
 impl_asm_inst_trait!(VCVTInst);
 impl VCVTInst {
     pub fn new(ty: VCVTType, to: AsmOperand, from: AsmOperand) -> Self {
@@ -679,6 +686,16 @@ pub enum MovType {
     Reg,
     Movw,
     Movt,
+}
+
+impl ToString for MovType {
+    fn to_string(&self) -> String {
+        match self {
+            MovType::Reg => "MOV".to_string(),
+            MovType::Movw => "MOVW".to_string(),
+            MovType::Movt => "MOVT".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -715,6 +732,14 @@ impl FCMPInst {
         }
     }
 }
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct FBinaryOp(pub BinaryOp);
+
+impl From<BinaryOp> for FBinaryOp {
+    fn from(op: BinaryOp) -> Self {
+        FBinaryOp(op)
+    }
+}
 /**
 * 1. fadd - vadd.f32 Fd, Fn, Fm 不支持立即数
 * 2. fsub - vsub.f32同上
@@ -724,12 +749,12 @@ impl FCMPInst {
  */
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FBinOpInst {
-    pub op: BinaryOp,
+    pub op: FBinaryOp,
     pub oprs: AsmOperandComponent,
 }
 impl_asm_inst_trait!(FBinOpInst);
 impl FBinOpInst {
-    pub fn new(op: BinaryOp, to: AsmOperand, op1: AsmOperand, op2: AsmOperand) -> Self {
+    pub fn new(op: FBinaryOp, to: AsmOperand, op1: AsmOperand, op2: AsmOperand) -> Self {
         Self {
             op,
             oprs: AsmOperandComponent::new(vec![to], vec![op1, op2]),
@@ -998,15 +1023,28 @@ impl Operand2 {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BrInst {
-    cond: Cond,
-    target: AsmValueId, // AsmBlock
+    pub cond: Cond,
+    pub target: AsmValueId, // AsmBlock
+    pub target_label: Option<String>,
 }
 
 impl_asm_inst_trait_no_oprs!(BrInst);
 
 impl BrInst {
     pub fn new(cond: Cond, target: AsmValueId) -> BrInst {
-        BrInst { cond, target }
+        BrInst {
+            cond,
+            target,
+            target_label: None,
+        }
+    }
+
+    pub fn new_with_label(cond: Cond, target: AsmValueId, target_label: String) -> BrInst {
+        BrInst {
+            cond,
+            target,
+            target_label: Some(target_label),
+        }
     }
 }
 

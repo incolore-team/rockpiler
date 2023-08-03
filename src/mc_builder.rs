@@ -9,7 +9,7 @@ use crate::{
     mc::*,
     mc_inst::{
         self, AsmInst, AsmInstTrait, BinOpInst, BinaryOp, BrInst, CMPInst, Cond, ConstraintsTrait,
-        FBinOpInst, FCMPInst, LDRInst, MovInst, MovType, PrologueInst, RetInst, STRInst,
+        FBinOpInst, FBinaryOp, FCMPInst, LDRInst, MovInst, MovType, PrologueInst, RetInst, STRInst,
         StackOpInstTrait, VCVTInst, VCVTType, VLDRInst, VMovInst, VMovType, VSTRInst,
     },
 };
@@ -134,7 +134,7 @@ impl McBuilder<'_> {
         let ssa_func = self.ir_module.get_func(*func_id);
         let asm_func = ssa_func.clone().into();
         let asm_func_id = self.module.alloc_value(AsmValue::Function(asm_func));
-        self.module.functions.push(asm_func_id);
+        self.module.funcs.push(asm_func_id);
 
         let mut prev_asm_bb_id = None;
         for (_name, block_id) in &ssa_func.bbs.bbs.clone() {
@@ -345,6 +345,12 @@ impl McBuilder<'_> {
         self.module.add_all_before_branch(asm_bb_id, to_add)
     }
 
+    fn get_label(&mut self, asm_bb_id: AsmValueId) -> String {
+        let asm_bb = self.module.get_bb(asm_bb_id);
+        let label = asm_bb.name.clone();
+        label
+    }
+
     fn visit_term_inst(
         &mut self,
         asm_func_id: AsmValueId,
@@ -355,8 +361,10 @@ impl McBuilder<'_> {
         match inst_ {
             InstValue::Jump(jump_inst) => {
                 let target_bb_id = jump_inst.bb;
-                let target_asm_bb_id = self.bb_map.get(&target_bb_id).unwrap();
-                let jmp_inst = BrInst::new(mc_inst::Cond::AL, *target_asm_bb_id);
+                let target_asm_bb_id = *self.bb_map.get(&target_bb_id).unwrap();
+                let target_label = self.get_label(target_asm_bb_id);
+                let jmp_inst =
+                    BrInst::new_with_label(mc_inst::Cond::AL, target_asm_bb_id, target_label);
                 let jmp_inst_id = self
                     .module
                     .alloc_value(AsmValue::Inst(AsmInst::Br(jmp_inst)));
@@ -364,8 +372,8 @@ impl McBuilder<'_> {
                 abb.insts.push(jmp_inst_id);
 
                 // 前驱后继维护
-                abb.succs = vec![*target_asm_bb_id];
-                let target_bb = self.module.get_bb_mut(*target_asm_bb_id);
+                abb.succs = vec![target_asm_bb_id];
+                let target_bb = self.module.get_bb_mut(target_asm_bb_id);
                 target_bb.preds.push(asm_bb_id);
             }
             InstValue::Return(ret_inst) => {
@@ -414,7 +422,7 @@ impl McBuilder<'_> {
                 }
                 let ret_inst_id = self
                     .module
-                    .alloc_value(AsmValue::Inst(AsmInst::RetInst(asm_ret_inst)));
+                    .alloc_value(AsmValue::Inst(AsmInst::Ret(asm_ret_inst)));
                 let mut abb = self.module.get_bb_mut(asm_bb_id);
                 abb.insts.push(ret_inst_id);
                 abb.succs = vec![];
@@ -432,10 +440,10 @@ impl McBuilder<'_> {
                     abb.insts.extend(insts);
                     next_bb = abb.next;
                 }
-                let then_bb = self.bb_map.get(&br_inst.then_bb).unwrap();
-                let else_bb = self.bb_map.get(&br_inst.else_bb).unwrap();
+                let then_bb = *self.bb_map.get(&br_inst.then_bb).unwrap();
+                let else_bb = *self.bb_map.get(&br_inst.else_bb).unwrap();
 
-                if *then_bb == next_bb.unwrap() {
+                if then_bb == next_bb.unwrap() {
                     //  ==0 跳转到false
                     // abb.insts.push(
                     //     BrInst::builder(fb)
@@ -443,14 +451,15 @@ impl McBuilder<'_> {
                     //         .with_comment(inst.to_string())
                     //         .build(),
                     // );
-                    let br_inst = BrInst::new(Cond::EQ, *else_bb);
+                    let target_label = self.get_label(else_bb);
+                    let br_inst = BrInst::new_with_label(Cond::EQ, else_bb, target_label);
                     let br_inst_id = self
                         .module
                         .alloc_value(AsmValue::Inst(AsmInst::Br(br_inst)));
 
                     let abb = self.module.get_bb_mut(asm_bb_id);
                     abb.insts.push(br_inst_id);
-                } else if *else_bb == next_bb.unwrap() {
+                } else if else_bb == next_bb.unwrap() {
                     // != 0跳转到true
                     // abb.insts.push(
                     //     BrInst::builder(tb)
@@ -458,7 +467,8 @@ impl McBuilder<'_> {
                     //         .with_comment(inst.to_string())
                     //         .build(),
                     // );
-                    let br_inst = BrInst::new(Cond::NE, *then_bb);
+                    let target_label = self.get_label(then_bb);
+                    let br_inst = BrInst::new_with_label(Cond::NE, then_bb, target_label);
                     let br_inst_id = self
                         .module
                         .alloc_value(AsmValue::Inst(AsmInst::Br(br_inst)));
@@ -472,7 +482,8 @@ impl McBuilder<'_> {
                     //         .build(),
                     // );
                     // abb.insts.push(BrInst::builder(fb).build());
-                    let br_inst = BrInst::new(Cond::NE, *then_bb);
+                    let target_label = self.get_label(then_bb);
+                    let br_inst = BrInst::new_with_label(Cond::NE, then_bb, target_label);
                     let br_inst_id = self
                         .module
                         .alloc_value(AsmValue::Inst(AsmInst::Br(br_inst)));
@@ -480,7 +491,7 @@ impl McBuilder<'_> {
                     abb.insts.push(br_inst_id);
                 }
                 let mut abb = self.module.get_bb_mut(asm_bb_id);
-                abb.succs = vec![*then_bb, *else_bb];
+                abb.succs = vec![then_bb, else_bb];
             }
             _ => panic!("Unknown Terminator Inst."),
         }
@@ -529,7 +540,12 @@ impl McBuilder<'_> {
                 if !infix_op.op.is_boolean() {
                     assert_eq!(op1.is_float(), to.is_float());
                     let bin_id = if is_float {
-                        let bin = FBinOpInst::new(infix_op.op.clone().into(), to, op1, op2);
+                        let bin = FBinOpInst::new(
+                            FBinaryOp::from(BinaryOp::from(infix_op.op.clone())),
+                            to,
+                            op1,
+                            op2,
+                        );
                         self.module
                             .alloc_value(AsmValue::Inst(AsmInst::FBinOp(bin)))
                     } else {
