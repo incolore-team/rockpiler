@@ -1000,9 +1000,9 @@ impl BinOpInst {
 
     pub fn op_to_string(op: &BinaryOp) -> &'static str {
         match op {
-            BinaryOp::Add => "ADD",
-            BinaryOp::Sub => "SUB",
-            BinaryOp::Mul => "MUL",
+            BinaryOp::Add => "ADD ",
+            BinaryOp::Sub => "SUB ",
+            BinaryOp::Mul => "MUL ",
             BinaryOp::Div => "SDIV",
             _ => unreachable!(),
         }
