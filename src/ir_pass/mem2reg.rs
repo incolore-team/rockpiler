@@ -1,11 +1,8 @@
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    default,
-};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::{
     ast::Type,
-    ir::{AllocaInst, BasicBlockValue, ConstValue, InstValue, Module, Value, ValueId},
+    ir::{ConstValue, InstValue, Module, Value, ValueId},
 };
 
 pub fn run(module: &mut Module) {
@@ -37,7 +34,7 @@ struct IncompletePhi {
 impl Mem2Reg<'_> {
     pub fn new(module: &mut Module) -> Mem2Reg {
         Mem2Reg {
-            module: module,
+            module,
             cur_func: None,
             var_defs: HashMap::new(),
             dead_phis: HashMap::new(),
@@ -49,8 +46,8 @@ impl Mem2Reg<'_> {
 
     pub fn run(&mut self) {
         for (_, func_val_id) in &self.module.functions.clone() {
-            self.cur_func = Some(func_val_id.clone());
-            self.run_on_func(func_val_id.clone());
+            self.cur_func = Some(*func_val_id);
+            self.run_on_func(*func_val_id);
             self.cur_func = None;
         }
     }
@@ -62,7 +59,7 @@ impl Mem2Reg<'_> {
         }
 
         let promotables = self.find_promotables();
-        if promotables.len() == 0 {
+        if promotables.is_empty() {
             return;
         }
 
@@ -75,7 +72,7 @@ impl Mem2Reg<'_> {
             let mut bb = self.module.get_bb(bb_id.to_owned()).clone();
 
             bb.insts.retain(|inst_id| {
-                let inst_id = inst_id.clone();
+                let inst_id = *inst_id;
                 let inst = self.module.get_inst(inst_id);
                 if let InstValue::Load(load_inst) = inst {
                     // if load src ptr is not promotable, keep it
@@ -105,18 +102,18 @@ impl Mem2Reg<'_> {
 
             self.module.get_bb_mut(bb_id).insts = bb.insts.clone();
 
-            self.filled_bbs.insert(bb_id.clone());
+            self.filled_bbs.insert(bb_id);
         }
 
         // 3. 处理incompletePhi
-        while self.incomplete_phis.len() > 0 {
+        while !self.incomplete_phis.is_empty() {
             let incomplete_phi = self.incomplete_phis.pop_front().unwrap();
             self.add_phi_operands(incomplete_phi.phi, incomplete_phi.bb_id, incomplete_phi.ptr);
         }
 
         // 把所有phi指令加入基本块
         for phi in self.pending_phis.clone() {
-            let bb = self.module.get_parent_mut(phi.clone());
+            let bb = self.module.get_parent_mut(phi);
             bb.insts.insert(0, phi);
         }
 
@@ -138,10 +135,10 @@ impl Mem2Reg<'_> {
         let defs = defs.unwrap();
         let def_in_cur_bb = defs.get(&bb_id);
         if let Some(def) = def_in_cur_bb {
-            return self.find_in_dead_phis(def.clone());
+            return self.find_in_dead_phis(*def);
         }
 
-        return self.read_var_recursive(bb_id, ptr);
+        self.read_var_recursive(bb_id, ptr)
     }
 
     fn read_var_recursive(&mut self, bb_id: ValueId, alloca_id: ValueId) -> ValueId {
@@ -150,8 +147,8 @@ impl Mem2Reg<'_> {
         if !self.is_bb_sealed(bb_id) {
             let phi_val = self.create_incomplete_phi(alloca_id, bb_id);
             self.incomplete_phis.push_back(IncompletePhi {
-                phi: phi_val.clone(),
-                bb_id: bb_id,
+                phi: phi_val,
+                bb_id,
                 ptr: alloca_id,
             });
             val_id = phi_val;
@@ -161,7 +158,7 @@ impl Mem2Reg<'_> {
         } else {
             // Break potential cycles with operandless phi
             let phi_id = self.create_incomplete_phi(alloca_id, bb_id);
-            self.write_var(bb_id, alloca_id, phi_id.clone());
+            self.write_var(bb_id, alloca_id, phi_id);
             val_id = self.add_phi_operands(phi_id, bb_id, alloca_id)
         }
         self.write_var(bb_id, alloca_id, val_id);
@@ -172,8 +169,8 @@ impl Mem2Reg<'_> {
         let alloca = self.module.get_inst(alloca_id);
         let ty = alloca.ty();
         let phi = self.module.alloc_phi_inst(ty); // todo: set parent for it
-        self.pending_phis.insert(phi.clone());
-        self.module.value_parent.insert(phi.clone(), bb_id);
+        self.pending_phis.insert(phi);
+        self.module.value_parent.insert(phi, bb_id);
         phi
     }
 
@@ -186,7 +183,7 @@ impl Mem2Reg<'_> {
                 return false;
             }
         }
-        return true;
+        true
     }
 
     fn find_in_dead_phis(&mut self, def: ValueId) -> ValueId {
@@ -209,15 +206,15 @@ impl Mem2Reg<'_> {
         let mut compress_todo: Vec<ValueId> = Vec::new();
         while let Some(next) = self.dead_phis.get(&cur) {
             compress_todo.push(cur);
-            cur = next.clone();
+            cur = *next;
         }
 
         // path compression
         for phi in compress_todo {
-            self.dead_phis.insert(cur.clone(), phi.clone());
+            self.dead_phis.insert(cur, phi);
         }
 
-        return def.clone();
+        def
     }
 
     pub fn add_phi_operands(
@@ -234,7 +231,7 @@ impl Mem2Reg<'_> {
             );
             self.module.add_phi_incoming(phi_id, bb_id, val)
         }
-        return self.try_remove_trivial_phi(phi_id, alloca_id);
+        self.try_remove_trivial_phi(phi_id, alloca_id)
     }
 
     /// 移除“平凡（trivial）” Phi 函数节点的算法。所谓“平凡”指的是这个 Phi 函数节点
@@ -254,14 +251,15 @@ impl Mem2Reg<'_> {
             }
         }
 
-        if same_val.is_none() { // 所有operand都是phi自己
+        if same_val.is_none() {
+            // 所有operand都是phi自己
             // assert self.module.value_user[phi_id].is_empty()
             undef = true;
             same_val = Some(self.get_undef_value(self.module.get_inst(phi_id).ty()));
         }
 
         let mut to_recursive = Vec::new();
-        for user_id in self.module.get_users_of(phi_id).clone() {
+        for user_id in self.module.get_users_of(phi_id) {
             // if user is another phi
             if let InstValue::Phi(_) = self.module.get_inst(user_id) {
                 to_recursive.push(user_id);
@@ -284,7 +282,7 @@ impl Mem2Reg<'_> {
     }
 
     fn get_undef_value(&mut self, ty: Type) -> ValueId {
-        return self.module.alloc_value(ConstValue::zero_of(ty).into());
+        self.module.alloc_value(ConstValue::zero_of(ty).into())
     }
 
     // 记录 alloca_id 变量在 bb_id 基本块中曾经被设置值为 val_id
@@ -311,7 +309,7 @@ impl Mem2Reg<'_> {
         let mut promotables = Vec::new();
 
         let func = self.module.get_func(self.cur_func.unwrap());
-        let entry_id = func.bbs.entry_bb().clone();
+        let entry_id = *func.bbs.entry_bb();
         let insts = self.module.get_bb(entry_id).insts.clone();
         for inst_id in insts {
             let inst = self.module.get_inst(inst_id);

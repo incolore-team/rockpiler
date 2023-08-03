@@ -189,10 +189,10 @@ impl InferEvaluator for PostfixExpr {
 
         match &self.op {
             PostfixOp::Incr | PostfixOp::Decr => self.infer_type_incr_decr(&lhs_type),
-            PostfixOp::CallAccess(call) => self.infer_type_call_access(&lhs_type, &call),
-            PostfixOp::DotAccess(dot) => self.infer_type_dot_access(&lhs_type, &dot),
+            PostfixOp::CallAccess(call) => self.infer_type_call_access(&lhs_type, call),
+            PostfixOp::DotAccess(dot) => self.infer_type_dot_access(&lhs_type, dot),
             PostfixOp::IndexAccess(IndexAccess { index }) => {
-                self.infer_type_index_access(&lhs_type, &index)
+                self.infer_type_index_access(&lhs_type, index)
             }
         }
     }
@@ -284,7 +284,7 @@ impl InferEvaluator for CallExpr {
                 }
             }
 
-            Some(func.ret_ty.clone())
+            Some(func.ret_ty)
         } else {
             None
         }
@@ -309,7 +309,7 @@ impl InferEvaluator for CallExpr {
 impl InferEvaluator for IdentExpr {
     fn infer_type(&self, syms: &SymbolTable) -> Option<Type> {
         if let Some(Symbol::Var(var_sym)) = syms.resolve_symbol(&self.id) {
-            Some(var_sym.var.type_.clone())
+            Some(var_sym.var.type_)
         } else {
             None
         }

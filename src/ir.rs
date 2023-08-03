@@ -1,4 +1,4 @@
-use std::collections::{HashMap, LinkedList};
+use std::collections::HashMap;
 
 use crate::{
     ast::*,
@@ -48,7 +48,9 @@ pub struct Module {
 
 impl Module {
     pub fn new(syms: SymbolTable) -> Self {
-        let module = Module {
+        
+        // module.add_builtin_types();
+        Module {
             values: Arena::new(),
             types: Arena::new(),
             global_variables: LinkedHashMap::new(),
@@ -63,9 +65,7 @@ impl Module {
             value_using: HashMap::new(),
             value_name: HashMap::new(),
             value_parent: HashMap::new(),
-        };
-        // module.add_builtin_types();
-        module
+        }
     }
 
     pub fn get_bb_mut(&mut self, bb_id: ValueId) -> &mut BasicBlockValue {
@@ -100,14 +100,14 @@ impl Module {
             let user = &self.values[user_id];
             match user {
                 Value::Instruction(inst) => match inst {
-                    InstValue::Branch(br) => {
+                    InstValue::Branch(_br) => {
                         // if br.then_bb == bb_id {
                         //     continue;
                         // }
                         let br_bb = self.value_parent[&user_id];
                         preds.push(br_bb);
                     }
-                    InstValue::Jump(jmp) => {
+                    InstValue::Jump(_jmp) => {
                         let jmp_bb = self.value_parent[&user_id];
                         preds.push(jmp_bb);
                     }
@@ -117,6 +117,21 @@ impl Module {
             }
         }
         preds
+    }
+
+    pub fn get_phis(&self, bb_id: ValueId) -> Vec<ValueId> {
+        let bb = self.get_bb(bb_id);
+        let mut phis = vec![];
+        for inst_id in &bb.insts {
+            let inst = self.get_inst(*inst_id);
+            match inst {
+                InstValue::Phi(_phi) => {
+                    phis.push(*inst_id);
+                }
+                _ => {}
+            }
+        }
+        phis
     }
 
     pub fn get_func_mut(&mut self, func_id: ValueId) -> &mut FunctionValue {
@@ -184,8 +199,8 @@ impl Module {
 
     pub fn spawn_zero_value(&mut self, ty: Type) -> ValueId {
         let val = ConstValue::zero_of(ty);
-        let id = self.alloc_value(val.into());
-        id
+        
+        self.alloc_value(val.into())
     }
 
     pub fn cur_bb_mut(&mut self) -> &mut BasicBlockValue {
@@ -212,6 +227,14 @@ impl Module {
         self.cur_func = Some(func);
     }
 
+    pub fn cur_func_value_id(&self) -> ValueId {
+        self.cur_func.unwrap()
+    }
+
+    pub fn cur_bb_value_id(&self) -> ValueId {
+        self.cur_bb.unwrap()
+    }
+
     pub fn inspect_value(&self, value_id: ValueId) -> String {
         let value = &self.values[value_id];
         match value {
@@ -236,6 +259,18 @@ impl Module {
         }
     }
 
+    pub fn bb_has_phi(&self, bb_id: ValueId) -> bool {
+        let bb = self.get_bb(bb_id);
+        for inst_id in bb.insts.iter() {
+            let inst = self.get_inst(*inst_id);
+            match inst {
+                InstValue::Phi(_) => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
     pub fn inspect_value_users(&self, value_id: ValueId) -> String {
         let users = self.value_user.get(&value_id);
         if users.is_none() {
@@ -245,7 +280,7 @@ impl Module {
         let mut s = String::new();
         for user in users {
             s.push_str(&self.inspect_value(*user));
-            s.push_str("\n");
+            s.push('\n');
         }
         s
     }
@@ -361,7 +396,7 @@ impl Module {
         if tmp.is_none() {
             panic!("value has no parent: {}", self.inspect_value(value_id));
         }
-        tmp.unwrap().clone()
+        *tmp.unwrap()
     }
 
     pub fn get_parent(&self, value_id: ValueId) -> &BasicBlockValue {
@@ -453,6 +488,7 @@ impl Module {
             ty: func_value.ty(),
             func,
             args,
+            must_tail: false,
         };
         let val_id = self.alloc_value(call_inst.into());
 
@@ -498,13 +534,13 @@ impl Module {
         let gep = GetElementPtrInst {
             ty,
             base,
-            pointer,
+            ptr: pointer,
             indices: indices.clone(),
         };
         let gep_id = self.alloc_value(gep.into());
 
         self.mark_using(gep_id, pointer);
-        for index in indices.clone() {
+        for index in indices {
             self.mark_using(gep_id, index);
         }
 
@@ -529,8 +565,8 @@ impl Module {
             ty,
             incomings: Vec::new(),
         };
-        let phi_id = self.alloc_value(phi.into());
-        phi_id
+        
+        self.alloc_value(phi.into())
     }
 
     pub fn spawn_phi_inst(&mut self, ty: Type, incomings: Vec<(ValueId, ValueId)>) -> ValueId {
@@ -611,8 +647,8 @@ impl Module {
 
     pub fn alloc_basic_block(&mut self) -> ValueId {
         let bb = BasicBlockValue::default();
-        let bb_id = self.alloc_value(Value::BasicBlock(bb));
-        bb_id
+        
+        self.alloc_value(Value::BasicBlock(bb))
     }
     pub fn spawn_basic_block(&mut self) -> ValueId {
         let bb_id = self.alloc_basic_block();
@@ -630,16 +666,16 @@ impl Module {
 
         // 使用一个新的作用域来查找插入位置
         {
-            let entry_bb = self.get_bb(entry_bb_id.clone());
+            let entry_bb = self.get_bb(*entry_bb_id);
             ins_pos = entry_bb
                 .insts
                 .iter()
-                .position(|inst_id| !matches!(self.get_inst(inst_id.clone()), InstValue::Alloca(_)))
-                .unwrap_or_else(|| entry_bb.insts.len());
+                .position(|inst_id| !matches!(self.get_inst(*inst_id), InstValue::Alloca(_)))
+                .unwrap_or(entry_bb.insts.len());
         }
 
         // 在找到的位置插入新的alloca指令
-        let entry_bb_mut = self.get_bb_mut(entry_bb_id.clone());
+        let entry_bb_mut = self.get_bb_mut(*entry_bb_id);
         entry_bb_mut.insts.insert(ins_pos, alloca_id);
 
         alloca_id
@@ -660,6 +696,13 @@ impl Value {
     pub fn as_global_variable(&self) -> Option<&GlobalVariableValue> {
         match self {
             Value::GlobalVariable(gv) => Some(gv),
+            _ => None,
+        }
+    }
+
+    pub fn as_variable(&self) -> Option<&VariableValue> {
+        match self {
+            Value::VariableValue(v) => Some(v),
             _ => None,
         }
     }
@@ -709,7 +752,7 @@ pub struct FunctionValue {
     pub ret_ty: Type,
     pub bbs: BasicBlockList, // BasicBlocks
     pub is_external: bool,
-    pub is_var_arg: bool,
+    pub is_variadic: bool,
 }
 
 impl FunctionValue {
@@ -718,7 +761,7 @@ impl FunctionValue {
         params: Vec<ValueId>,
         ret_ty: Type,
         is_external: bool,
-        is_var_arg: bool,
+        is_variadic: bool,
     ) -> Self {
         FunctionValue {
             name,
@@ -726,7 +769,7 @@ impl FunctionValue {
             ret_ty,
             bbs: BasicBlockList::default(),
             is_external,
-            is_var_arg,
+            is_variadic,
         }
     }
 
@@ -791,9 +834,9 @@ impl BasicBlockValue {
     }
 }
 
-impl Into<Value> for BasicBlockValue {
-    fn into(self) -> Value {
-        Value::BasicBlock(self)
+impl From<BasicBlockValue> for Value {
+    fn from(val: BasicBlockValue) -> Self {
+        Value::BasicBlock(val)
     }
 }
 
@@ -990,6 +1033,15 @@ impl InstValue {
         }
     }
 
+    pub fn is_term(&self) -> bool {
+        match self {
+            InstValue::Branch(_) => true,
+            InstValue::Jump(_) => true,
+            InstValue::Return(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn has_output(&self) -> bool {
         match self {
             InstValue::InfixOp(_) => true,
@@ -1043,9 +1095,32 @@ pub enum ConstValue {
     Array(ConstArray),
 }
 
-impl Into<Value> for ConstValue {
-    fn into(self) -> Value {
-        Value::Const(self)
+impl ConstValue {
+    pub fn as_int(&self) -> Option<&ConstInt> {
+        match self {
+            ConstValue::Int(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn as_float(&self) -> Option<&ConstFloat> {
+        match self {
+            ConstValue::Float(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&ConstArray> {
+        match self {
+            ConstValue::Array(c) => Some(c),
+            _ => None,
+        }
+    }
+}
+
+impl From<ConstValue> for Value {
+    fn from(val: ConstValue) -> Self {
+        Value::Const(val)
     }
 }
 
@@ -1087,6 +1162,13 @@ impl ConstValue {
             _ => unimplemented!(),
         }
     }
+
+    pub fn is_array(&self) -> bool {
+        match self {
+            ConstValue::Array(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1095,9 +1177,9 @@ pub struct ConstInt {
     pub value: i64,
 }
 
-impl Into<Value> for ConstInt {
-    fn into(self) -> Value {
-        Value::Const(ConstValue::Int(self))
+impl From<ConstInt> for Value {
+    fn from(val: ConstInt) -> Self {
+        Value::Const(ConstValue::Int(val))
     }
 }
 
@@ -1107,9 +1189,9 @@ pub struct ConstFloat {
     pub value: f64,
 }
 
-impl Into<Value> for ConstFloat {
-    fn into(self) -> Value {
-        Value::Const(ConstValue::Float(self))
+impl From<ConstFloat> for Value {
+    fn from(val: ConstFloat) -> Self {
+        Value::Const(ConstValue::Float(val))
     }
 }
 
@@ -1119,9 +1201,9 @@ pub struct ConstArray {
     pub values: Vec<ConstValue>,
 }
 
-impl Into<Value> for ConstArray {
-    fn into(self) -> Value {
-        Value::Const(ConstValue::Array(self))
+impl From<ConstArray> for Value {
+    fn from(val: ConstArray) -> Self {
+        Value::Const(ConstValue::Array(val))
     }
 }
 
@@ -1132,9 +1214,9 @@ pub struct AllocaInst {
     pub name: String,
 }
 
-impl Into<Value> for AllocaInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Alloca(self))
+impl From<AllocaInst> for Value {
+    fn from(val: AllocaInst) -> Self {
+        Value::Instruction(InstValue::Alloca(val))
     }
 }
 
@@ -1153,9 +1235,9 @@ pub struct BinaryOperator {
     pub rhs: ValueId,
 }
 
-impl Into<Value> for BinaryOperator {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::InfixOp(self))
+impl From<BinaryOperator> for Value {
+    fn from(val: BinaryOperator) -> Self {
+        Value::Instruction(InstValue::InfixOp(val))
     }
 }
 
@@ -1167,11 +1249,12 @@ pub struct CallInst {
     pub ty: Type,
     pub func: ValueId,
     pub args: Vec<ValueId>,
+    pub must_tail: bool,
 }
 
-impl Into<Value> for CallInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Call(self))
+impl From<CallInst> for Value {
+    fn from(val: CallInst) -> Self {
+        Value::Instruction(InstValue::Call(val))
     }
 }
 
@@ -1212,9 +1295,9 @@ pub struct CastInst {
     pub new_ty: Type,
 }
 
-impl Into<Value> for CastInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Cast(self))
+impl From<CastInst> for Value {
+    fn from(val: CastInst) -> Self {
+        Value::Instruction(InstValue::Cast(val))
     }
 }
 
@@ -1227,9 +1310,9 @@ pub struct LoadInst {
     pub ptr: ValueId,
 }
 
-impl Into<Value> for LoadInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Load(self))
+impl From<LoadInst> for Value {
+    fn from(val: LoadInst) -> Self {
+        Value::Instruction(InstValue::Load(val))
     }
 }
 
@@ -1242,9 +1325,9 @@ pub struct StoreInst {
     pub ptr: ValueId,
 }
 
-impl Into<Value> for StoreInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Store(self))
+impl From<StoreInst> for Value {
+    fn from(val: StoreInst) -> Self {
+        Value::Instruction(InstValue::Store(val))
     }
 }
 
@@ -1257,20 +1340,20 @@ impl_replace_operands!(StoreInst, value, ptr);
 pub struct GetElementPtrInst {
     pub ty: Type,
     pub base: Type,
-    pub pointer: ValueId,
+    pub ptr: ValueId,
     pub indices: Vec<ValueId>,
 }
 
-impl Into<Value> for GetElementPtrInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Gep(self))
+impl From<GetElementPtrInst> for Value {
+    fn from(val: GetElementPtrInst) -> Self {
+        Value::Instruction(InstValue::Gep(val))
     }
 }
 
 impl GetElementPtrInst {
     pub fn replace_operands(&mut self, old_value_id: ValueId, new_value_id: ValueId) {
-        if self.pointer == old_value_id {
-            self.pointer = new_value_id;
+        if self.ptr == old_value_id {
+            self.ptr = new_value_id;
         }
         for index in &mut self.indices {
             if *index == old_value_id {
@@ -1286,9 +1369,9 @@ pub struct JumpInst {
     pub bb: ValueId,
 }
 
-impl Into<Value> for JumpInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Jump(self))
+impl From<JumpInst> for Value {
+    fn from(val: JumpInst) -> Self {
+        Value::Instruction(InstValue::Jump(val))
     }
 }
 
@@ -1302,9 +1385,9 @@ pub struct BranchInst {
     pub else_bb: ValueId,
 }
 
-impl Into<Value> for BranchInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Branch(self))
+impl From<BranchInst> for Value {
+    fn from(val: BranchInst) -> Self {
+        Value::Instruction(InstValue::Branch(val))
     }
 }
 
@@ -1342,9 +1425,9 @@ pub struct ReturnInst {
     pub value: Option<ValueId>,
 }
 
-impl Into<Value> for ReturnInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Return(self))
+impl From<ReturnInst> for Value {
+    fn from(val: ReturnInst) -> Self {
+        Value::Instruction(InstValue::Return(val))
     }
 }
 
@@ -1364,9 +1447,9 @@ pub enum TermInst {
     Return(ReturnInst),
 }
 
-impl Into<Value> for TermInst {
-    fn into(self) -> Value {
-        match self {
+impl From<TermInst> for Value {
+    fn from(val: TermInst) -> Self {
+        match val {
             TermInst::Jump(inst) => inst.into(),
             TermInst::Branch(inst) => inst.into(),
             TermInst::Return(inst) => inst.into(),
@@ -1391,8 +1474,8 @@ impl PhiInst {
     }
 }
 
-impl Into<Value> for PhiInst {
-    fn into(self) -> Value {
-        Value::Instruction(InstValue::Phi(self))
+impl From<PhiInst> for Value {
+    fn from(val: PhiInst) -> Self {
+        Value::Instruction(InstValue::Phi(val))
     }
 }

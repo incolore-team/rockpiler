@@ -14,7 +14,7 @@ pub struct InstNamer<'a> {
 impl InstNamer<'_> {
     pub fn new(module: &mut Module) -> InstNamer {
         InstNamer {
-            module: module,
+            module,
             next_id: 0,
             next_phi_id: 0,
         }
@@ -60,12 +60,12 @@ impl InstNamer<'_> {
     }
 
     pub fn visit_bb(&mut self, block_val_id: ValueId) {
-        let block = self.module.get_bb(block_val_id.clone()).clone();
+        let block = self.module.get_bb(block_val_id).clone();
         if block.name != "entry" {
             let name = self.generate_bb_name();
             self.assign(block_val_id, name);
         }
-        for inst_val_id in &block.insts.clone() {
+        for inst_val_id in &block.insts {
             self.visit_inst(*inst_val_id);
         }
     }
@@ -85,7 +85,7 @@ impl InstNamer<'_> {
     }
 
     pub fn assign(&mut self, val_id: ValueId, name: String) {
-        log::debug!("set name {} to value {}", name.clone(), val_id.index());
+        log::debug!("set name {} to value {}", name, val_id.index());
         self.module.value_name.insert(val_id, name);
     }
 

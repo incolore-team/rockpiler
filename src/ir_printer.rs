@@ -1,12 +1,7 @@
-use std::{any::Any, fmt::format};
-
-use clap::ValueEnum;
-use log::debug;
-
 use crate::{ast::*, ir::*};
 
 pub fn print(module: &mut Module) {
-    let mut printer = Printer { module: module };
+    let mut printer = Printer { module };
     printer.print_module();
 }
 
@@ -52,7 +47,7 @@ impl<'a> Printer<'a> {
 
     pub fn print_function(&mut self, name: &str, func_val_id: ValueId) {
         let func = self.module.get_func(func_val_id);
-        if func.bbs.bbs.len() == 0 {
+        if func.bbs.bbs.is_empty() {
             self.print_external_function(name, func_val_id);
             return;
         }
@@ -91,7 +86,7 @@ impl<'a> Printer<'a> {
     }
 
     pub fn print_block(&mut self, name: &str, bb_val_id: ValueId) {
-        let bb = self.module.get_bb(bb_val_id.clone());
+        let bb = self.module.get_bb(bb_val_id);
         // println!("{}:", name);
         if name != "entry" {
             println!(
@@ -123,7 +118,7 @@ impl<'a> Printer<'a> {
     }
 
     pub fn print_gep_inst(&mut self, val_id: &ValueId, inst: &GetElementPtrInst) {
-        let ptr_val = Value::resolve(inst.pointer, self.module);
+        let ptr_val = Value::resolve(inst.ptr, self.module);
         let index_vals: Vec<_> = inst
             .indices
             .iter()
@@ -132,9 +127,9 @@ impl<'a> Printer<'a> {
 
         print!(
             "{} = getelementptr {}, ptr {}",
-            self.resolve_name(&val_id),
+            self.resolve_name(val_id),
             self.format_type(&inst.ty),
-            self.format_value(&inst.pointer, ptr_val)
+            self.format_value(&inst.ptr, ptr_val)
         );
         for i in 0..index_vals.len() {
             print!(
@@ -166,7 +161,7 @@ impl<'a> Printer<'a> {
         };
         print!(
             "{} = call {} @{}(",
-            self.resolve_name(&val_id),
+            self.resolve_name(val_id),
             self.format_type(&Value::ty(func)),
             func_name
         );
@@ -191,7 +186,7 @@ impl<'a> Printer<'a> {
         };
         print!(
             "{} = phi {}",
-            self.resolve_name(&val_id),
+            self.resolve_name(val_id),
             self.format_type(&inst.ty)
         );
         for (i, (bb, val)) in inst.incomings.iter().enumerate() {
@@ -226,7 +221,7 @@ impl<'a> Printer<'a> {
         let ty = Value::ty(src_val);
         print!(
             "{} = load {}, ptr {}",
-            self.resolve_name(&val_id),
+            self.resolve_name(val_id),
             self.format_type(&ty),
             self.resolve_name(&inst.ptr)
         );
@@ -287,10 +282,10 @@ impl<'a> Printer<'a> {
         println!();
     }
 
-    pub fn print_ret_inst(&mut self, val_id: &ValueId, inst: &ReturnInst) {
+    pub fn print_ret_inst(&mut self, _val_id: &ValueId, inst: &ReturnInst) {
         if let Some(val_id) = &inst.value {
             let val = Value::resolve(*val_id, self.module);
-            print!("ret {} {}", "i32", self.format_value(val_id, val));
+            print!("ret i32 {}", self.format_value(val_id, val));
         }
         println!();
     }
@@ -301,7 +296,7 @@ impl<'a> Printer<'a> {
             Value::Function(_) => todo!(),
             Value::BasicBlock(_) => self.resolve_name(val_id),
             // Value::Instruction(inst) => self.format_inst(val_id, inst),
-            Value::Instruction(inst) => self.resolve_name(val_id),
+            Value::Instruction(_inst) => self.resolve_name(val_id),
             Value::Const(c) => self.format_const(c),
             Value::VariableValue(_) => self.resolve_name(val_id),
         }
@@ -365,8 +360,8 @@ impl<'a> Printer<'a> {
         }
         panic!(
             "no name for value: {}. users: {}",
-            self.module.inspect_value(val_id.clone()),
-            self.module.inspect_value_users(val_id.clone())
+            self.module.inspect_value(*val_id),
+            self.module.inspect_value_users(*val_id)
         );
     }
 
@@ -402,10 +397,10 @@ impl<'a> Printer<'a> {
             ConstValue::Array(ca) => {
                 // debug!("const_array: {:?}", ca);
                 if let Type::Array(ArrayType::Constant(const_at)) = &ca.ty {
-                    if ca.values.len() == 0 {
+                    if ca.values.is_empty() {
                         return "zeroinitializer".to_string();
                     }
-                    let mut ret = format!("[");
+                    let mut ret = "[".to_string();
                     let mut is_first = true;
                     let dim = const_at.size;
                     for i in 0..dim {

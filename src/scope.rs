@@ -36,7 +36,7 @@ impl Scope {
     }
 
     // 查询符号，从当前作用域开始查找，如果找不到，递归查找父作用域
-    pub fn lookup<'a>(&self, name: &str, scope_arena: &'a ScopeArena) -> Option<SymbolId> {
+    pub fn lookup(&self, name: &str, scope_arena: &ScopeArena) -> Option<SymbolId> {
         if let Some(symbol_id) = self.symbols.get(name) {
             Some(*symbol_id)
         } else if let Some(parent_id) = self.parent {
@@ -87,11 +87,7 @@ impl SymbolTable {
     }
 
     pub fn resolve_symbol(&self, name: &str) -> Option<Symbol> {
-        if let Some(symbol_id) = self.lookup_symbol(name) {
-            Some(self.symbols[symbol_id].clone())
-        } else {
-            None
-        }
+        self.lookup_symbol(name).map(|symbol_id| self.symbols[symbol_id].clone())
     }
 
     pub fn resolve_symbol_by_id(&self, symbol_id: SymbolId) -> Option<Symbol> {
