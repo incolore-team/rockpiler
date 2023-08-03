@@ -368,8 +368,8 @@ impl McBuilder<'_> {
 
     fn get_label(&mut self, asm_bb_id: AsmValueId) -> String {
         let asm_bb = self.module.get_bb(asm_bb_id);
-        let label = asm_bb.name.clone();
-        label
+        
+        asm_bb.name.clone()
     }
 
     fn visit_term_inst(

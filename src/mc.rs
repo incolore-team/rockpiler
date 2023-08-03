@@ -263,6 +263,7 @@ impl AsmTypeTag {
         }
     }
 }
+#[derive(Default)]
 pub struct StackState {
     pub alloca_finished: bool,
     pub spill_size: i64,
@@ -270,16 +271,7 @@ pub struct StackState {
     max_arg_size: i64,
 }
 
-impl Default for StackState {
-    fn default() -> Self {
-        Self {
-            alloca_finished: false,
-            spill_size: 0,
-            local_size: 0,
-            max_arg_size: 0,
-        }
-    }
-}
+
 
 impl StackState {
     // Returns offset relative to BP, use as: bp-offset
@@ -731,7 +723,7 @@ impl ImmTrait for FloatImm {
     }
 
     fn highest_dword(&self) -> Imm {
-        let raw = self.cast_to_raw_int();
+        let _raw = self.cast_to_raw_int();
         Imm::Int(IntImm { value: 0 })
     }
 

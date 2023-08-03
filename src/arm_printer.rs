@@ -1,4 +1,4 @@
-use std::fmt::format;
+
 
 use crate::{mc::*, mc_inst::*};
 
@@ -35,7 +35,7 @@ impl<'a> Printer<'a> {
 
     pub fn print_inst(&mut self, inst_id: AsmValueId) {
         let inst = self.module.get_inst(inst_id).clone();
-        println!("    {}", inst.to_arm(&mut self.module));
+        println!("    {}", inst.to_arm(self.module));
     }
 }
 
@@ -80,7 +80,7 @@ impl ToArm for BinOpInst {
 }
 
 impl ToArm for BinaryOp {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
         match self {
             BinaryOp::Add => "ADD ".to_string(),
             BinaryOp::Sub => "SUB ".to_string(),
@@ -122,13 +122,13 @@ impl ToArm for Imm {
 }
 
 impl ToArm for IntImm {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
         format!("#0x{:x}", self.value as u64)
     }
 }
 
 impl ToArm for LabelImm {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
         match self.state {
             LabelImmState::High => format!("#:upper16:{}", self.label),
             LabelImmState::Label => self.label.to_string(),
@@ -161,7 +161,7 @@ impl ToArm for StackOperand {
 }
 
 pub fn to_signed_hex_string(offset: i64) -> String {
-    let mut offset = offset.clone();
+    let mut offset = offset;
     let mut result = String::new();
     if offset < 0 {
         result.push('-');
@@ -173,7 +173,7 @@ pub fn to_signed_hex_string(offset: i64) -> String {
 }
 
 impl ToArm for RegType {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
         match self {
             RegType::R0 => "r0".to_string(),
             RegType::R1 => "r1".to_string(),
@@ -195,41 +195,41 @@ impl ToArm for RegType {
     }
 }
 impl ToArm for VirtReg {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
-        return format!("vr{}", self.index);
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
+        format!("vr{}", self.index)
     }
 }
 impl ToArm for IntReg {
     fn to_arm(&self, module: &mut AsmModule) -> String {
-        return self.ty.to_arm(module);
+        self.ty.to_arm(module)
     }
 }
 impl ToArm for VfpDoubleReg {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
-        return "d16".to_string();
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
+        "d16".to_string()
     }
 }
 impl ToArm for VfpReg {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
         format!("s{}", self.index)
     }
 }
 impl ToArm for BrInst {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
         format!(
             "B{}\t{}",
-            self.cond.to_string(),
+            self.cond,
             self.target_label.clone().unwrap()
         )
     }
 }
 impl ToArm for BXInst {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
         unimplemented!("BXInst")
     }
 }
 impl ToArm for CallInst {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
         format!("BL\t{}", self.label.label)
     }
 }
@@ -254,7 +254,7 @@ impl ToArm for FBinOpInst {
 }
 
 impl ToArm for FBinaryOp {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
         match self.0 {
             BinaryOp::Add => "VADD.F32".to_string(),
             BinaryOp::Div => "VDIV.F32".to_string(),
@@ -339,8 +339,8 @@ impl ToArm for VMovInst {
     }
 }
 impl ToArm for VMRSInst {
-    fn to_arm(&self, module: &mut AsmModule) -> String {
-        format!("vmrs\tAPSR_nzcv, FPSCR")
+    fn to_arm(&self, _module: &mut AsmModule) -> String {
+        "vmrs\tAPSR_nzcv, FPSCR".to_string()
     }
 }
 impl ToArm for VSTRInst {
