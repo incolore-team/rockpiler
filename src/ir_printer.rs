@@ -1,8 +1,3 @@
-
-
-
-
-
 use crate::{ast::*, ir::*};
 
 pub fn print(module: &mut Module) {

@@ -282,6 +282,7 @@ impl StackState {
 pub struct AsmBlock {
     pub prev: Option<AsmValueId>,
     pub next: Option<AsmValueId>,
+    pub name: String,
     pub preds: Vec<AsmValueId>,
     pub succs: Vec<AsmValueId>,
     pub insts: Vec<AsmValueId>,

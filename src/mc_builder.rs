@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    vec,
 };
 
 use crate::{
@@ -7,9 +8,9 @@ use crate::{
     ir::*,
     mc::*,
     mc_inst::{
-        self, AsmInst, AsmInstTrait, BinOpInst, BinaryOp, BrInst, CMPInst, Cond,
-        ConstraintsTrait, FBinOpInst, FCMPInst, LDRInst, MovInst, MovType, PrologueInst, RetInst,
-        STRInst, StackOpInstTrait, VCVTInst, VCVTType, VLDRInst, VMovInst, VMovType, VSTRInst,
+        self, AsmInst, AsmInstTrait, BinOpInst, BinaryOp, BrInst, CMPInst, Cond, ConstraintsTrait,
+        FBinOpInst, FCMPInst, LDRInst, MovInst, MovType, PrologueInst, RetInst, STRInst,
+        StackOpInstTrait, VCVTInst, VCVTType, VLDRInst, VMovInst, VMovType, VSTRInst,
     },
 };
 
@@ -46,12 +47,6 @@ impl Into<AsmGlobalVariable> for GlobalVariableValue {
 
 impl Into<AsmFunction> for FunctionValue {
     fn into(self) -> AsmFunction {
-        todo!()
-    }
-}
-
-impl Into<AsmBlock> for BasicBlockValue {
-    fn into(self) -> AsmBlock {
         todo!()
     }
 }
@@ -141,12 +136,25 @@ impl McBuilder<'_> {
         let asm_func_id = self.module.alloc_value(AsmValue::Function(asm_func));
         self.module.functions.push(asm_func_id);
 
+        let mut prev_asm_bb_id = None;
         for (_name, block_id) in &ssa_func.bbs.bbs.clone() {
-            let block = self.ir_module.get_bb(*block_id);
-            let asm_block = block.clone().into();
+            let mut asm_block = AsmBlock {
+                prev: None,
+                next: None,
+                name: _name.clone(),
+                preds: vec![],
+                succs: vec![],
+                insts: vec![],
+            };
+            asm_block.prev = prev_asm_bb_id;
             let asm_block_id = self.module.alloc_value(AsmValue::Block(asm_block));
-            self.module.cur_func_mut().bbs.push(asm_block_id);
+            if prev_asm_bb_id.is_some() {
+                let mut prev_asm_bb = self.module.get_bb_mut(prev_asm_bb_id.unwrap());
+                prev_asm_bb.next = Some(asm_block_id);
+            }
 
+            prev_asm_bb_id = Some(asm_block_id);
+            self.module.cur_func_mut().bbs.push(asm_block_id);
             self.bb_map.insert(*block_id, asm_block_id);
         }
         // prologue
@@ -509,7 +517,8 @@ impl McBuilder<'_> {
                 let mut op1 = self.convert_value(infix_op.lhs, asm_func_id, asm_bb_id);
                 let mut op2 = self.convert_value(infix_op.rhs, asm_func_id, asm_bb_id);
 
-                if infix_op.op.is_commutative() && op2.as_imm().is_none() && op1.as_imm().is_some() {
+                if infix_op.op.is_commutative() && op2.as_imm().is_none() && op1.as_imm().is_some()
+                {
                     std::mem::swap(&mut op1, &mut op2);
                 }
 
@@ -737,11 +746,11 @@ impl McBuilder<'_> {
 
                 let asm = if to.is_float() {
                     let ldr = VLDRInst::new(to, addr);
-                    
+
                     self.module.alloc_value(AsmValue::Inst(AsmInst::VLDR(ldr)))
                 } else {
                     let ldr = LDRInst::new(to, addr);
-                    
+
                     self.module.alloc_value(AsmValue::Inst(AsmInst::LDR(ldr)))
                 };
 
@@ -756,11 +765,11 @@ impl McBuilder<'_> {
 
                 let sto = if val.is_float() {
                     let inst = VSTRInst::new(val, addr);
-                    
+
                     self.module.alloc_value(AsmValue::Inst(AsmInst::VSTR(inst)))
                 } else {
                     let inst = STRInst::new(val, addr);
-                    
+
                     self.module.alloc_value(AsmValue::Inst(AsmInst::STR(inst)))
                 };
                 let mut insts = self.expand_inst_imm(sto);
@@ -846,13 +855,12 @@ impl McBuilder<'_> {
                     // Generate store for parameters in memory
                     let store_id = if vreg.is_float {
                         let store = VSTRInst::new(vreg.into(), stack_oper.into());
-                        
-                        self
-                            .module
+
+                        self.module
                             .alloc_value(AsmValue::Inst(AsmInst::VSTR(store)))
                     } else {
                         let store = STRInst::new(vreg.into(), stack_oper.into());
-                        
+
                         self.module.alloc_value(AsmValue::Inst(AsmInst::STR(store)))
                     };
                     let insts = self.expand_stack_operand_load_store(store_id);

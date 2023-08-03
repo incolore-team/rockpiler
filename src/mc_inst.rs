@@ -970,7 +970,7 @@ impl BinOpInst {
         BinOpInst { op, oprs }
     }
 
-    fn op_to_string(op: &BinaryOp) -> &'static str {
+    pub fn op_to_string(op: &BinaryOp) -> &'static str {
         match op {
             BinaryOp::Add => "ADD",
             BinaryOp::Sub => "SUB",

@@ -14,7 +14,7 @@ pub mod ir_printer;
 pub mod mc;
 pub mod mc_builder;
 pub mod mc_inst;
-pub mod mc_printer;
+pub mod arm_printer;
 pub mod parser;
 pub mod scope;
 pub mod sema;
