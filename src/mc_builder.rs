@@ -3,8 +3,10 @@ use std::{
     vec,
 };
 
+use log::debug;
+
 use crate::{
-    ast::{BuiltinType, Type},
+    ast::{ArrayType, BuiltinType, Type},
     ir::*,
     mc::*,
     mc_inst::{
@@ -918,16 +920,10 @@ impl McBuilder<'_> {
     ) {
         let gep_inst = self.ir_module.get_inst(inst_id).as_gep();
         let mut base_size = gep_inst.base.size();
+        let mut ty = gep_inst.ty.clone();
         let mut dims;
 
-        if let Some(d) = &gep_inst
-            .base
-            .as_array()
-            .unwrap()
-            .as_constant()
-            .unwrap()
-            .dims
-        {
+        if let Some(d) = &gep_inst.ty.as_array().unwrap().as_constant().unwrap().dims {
             dims = d.clone();
         } else {
             dims = Vec::new();
@@ -939,13 +935,12 @@ impl McBuilder<'_> {
             let val = self.ir_module.get_value(idx_val_id);
             if let Value::Const(cv) = &val {
                 let num = cv.as_int().unwrap().value;
-                assert!(base_size != usize::MIN);
-                offset += base_size as i64 * num;
-                if !dims.is_empty() {
-                    base_size /= dims.remove(0);
-                } else {
-                    // Set as invalid
-                    base_size = usize::MIN;
+                let ty_size = ty.size();
+                assert!(ty_size != usize::MIN);
+                offset += ty_size as i64 * num;
+                if let Type::Array(ArrayType::Constant(const_at)) = ty {
+                    let elem_type = const_at.element_type;
+                    ty = *elem_type;
                 }
             } else {
                 if offset != 0 {
