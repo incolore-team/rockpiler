@@ -193,7 +193,7 @@ impl ToArm for VirtReg {
         format!("vr{}", self.index)
     }
 }
-impl ToArm for IntReg {
+impl ToArm for Reg {
     fn to_arm(&self, module: &mut AsmModule) -> String {
         self.ty.to_arm(module)
     }
@@ -352,8 +352,8 @@ impl PrologueInst {
         let stack_size = func.stack_state.total_stack_size() as i32;
         let binop = BinOpInst::new(
             BinaryOp::Sub,
-            IntReg::new(RegType::Sp).into(),
-            IntReg::new(RegType::Sp).into(),
+            Reg::new(RegType::Sp).into(),
+            Reg::new(RegType::Sp).into(),
             IntImm::new(stack_size as u32).into(),
         );
         let binop_id = module.alloc_value(AsmValue::Inst(AsmInst::BinOp(binop)));

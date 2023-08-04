@@ -28,8 +28,8 @@ pub trait ConstraintsTrait {
     fn get_out_constraints(&self) -> &RegConstraintMap;
     fn get_in_constraints_mut(&mut self) -> &mut RegConstraintMap;
     fn get_out_constraints_mut(&mut self) -> &mut RegConstraintMap;
-    fn set_in_constraint(&mut self, key: VirtReg, value: AsmOperand);
-    fn set_out_constraint(&mut self, key: VirtReg, value: AsmOperand);
+    fn set_in_constraint(&mut self, key: AsmOperand, value: VirtReg);
+    fn set_out_constraint(&mut self, key: AsmOperand, value: VirtReg);
 }
 
 macro_rules! impl_constraints_trait {
@@ -51,15 +51,71 @@ macro_rules! impl_constraints_trait {
                 &mut self.constraints.out_constraints
             }
 
-            fn set_in_constraint(&mut self, key: VirtReg, value: AsmOperand) {
+            fn set_in_constraint(&mut self, key: AsmOperand, value: VirtReg) {
                 self.constraints.in_constraints.insert(key, value);
             }
 
-            fn set_out_constraint(&mut self, key: VirtReg, value: AsmOperand) {
+            fn set_out_constraint(&mut self, key: AsmOperand, value: VirtReg) {
                 self.constraints.out_constraints.insert(key, value);
             }
         }
     };
+}
+
+impl ConstraintsTrait for AsmInst {
+    fn get_in_constraints(&self) -> &RegConstraintMap {
+        match self {
+            AsmInst::Call(i) => i.get_in_constraints(),
+            AsmInst::Prologue(i) => i.get_in_constraints(),
+            AsmInst::Ret(i) => i.get_in_constraints(),
+            _ => panic!("get_in_constraints: not implemented"),
+        }
+    }
+
+    fn get_out_constraints(&self) -> &RegConstraintMap {
+        match self {
+            AsmInst::Call(i) => i.get_out_constraints(),
+            AsmInst::Prologue(i) => i.get_out_constraints(),
+            AsmInst::Ret(i) => i.get_out_constraints(),
+            _ => panic!("get_out_constraints: not implemented"),
+        }
+    }
+
+    fn get_in_constraints_mut(&mut self) -> &mut RegConstraintMap {
+        match self {
+            AsmInst::Call(i) => i.get_in_constraints_mut(),
+            AsmInst::Prologue(i) => i.get_in_constraints_mut(),
+            AsmInst::Ret(i) => i.get_in_constraints_mut(),
+            _ => panic!("get_in_constraints_mut: not implemented"),
+        }
+    }
+
+    fn get_out_constraints_mut(&mut self) -> &mut RegConstraintMap {
+        match self {
+            AsmInst::Call(i) => i.get_out_constraints_mut(),
+            AsmInst::Prologue(i) => i.get_out_constraints_mut(),
+            AsmInst::Ret(i) => i.get_out_constraints_mut(),
+            _ => panic!("get_out_constraints_mut: not implemented"),
+        }
+    }
+
+    fn set_in_constraint(&mut self, key: AsmOperand, value: VirtReg) {
+        match self {
+            AsmInst::Call(i) => i.set_in_constraint(key, value),
+            AsmInst::Prologue(i) => i.set_in_constraint(key, value),
+            AsmInst::Ret(i) => i.set_in_constraint(key, value),
+            _ => panic!("set_in_constraint: not implemented"),
+        }
+    }
+
+    fn set_out_constraint(&mut self, key: AsmOperand, value: VirtReg) {
+        match self {
+            AsmInst::Call(i) => i.set_out_constraint(key, value),
+            AsmInst::Prologue(i) => i.set_out_constraint(key, value),
+            AsmInst::Ret(i) => i.set_out_constraint(key, value),
+            _ => panic!("set_out_constraint: not implemented"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -817,6 +873,21 @@ impl AsmInst {
 
     pub fn is_stack_op(&self) -> bool {
         matches!(self, AsmInst::LDR(_) | AsmInst::VLDR(_) | AsmInst::STR(_))
+    }
+
+    pub fn is_mov(&self) -> bool {
+        matches!(self, AsmInst::Mov(_))
+    }
+
+    pub fn is_vmov(&self) -> bool {
+        matches!(self, AsmInst::VMov(_))
+    }
+
+    pub fn has_reg_constraint(&self) -> bool {
+        matches!(
+            self,
+            AsmInst::Call(_) | AsmInst::Ret(_) | AsmInst::Prologue(_)
+        )
     }
 }
 

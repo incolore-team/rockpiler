@@ -6,8 +6,8 @@ pub enum AsmValue {
 }
 
 pub type AsmValueId = id_arena::Id<AsmValue>;
-/// VirtReg -> PhyReg (General or VFP)
-pub type RegConstraintMap = std::collections::HashMap<VirtReg, AsmOperand>;
+/// PhyReg -> VirtReg (General or VFP)
+pub type RegConstraintMap = std::collections::HashMap<AsmOperand, VirtReg>;
 
 pub struct AsmModule {
     values: id_arena::Arena<AsmValue>,
@@ -137,7 +137,7 @@ impl AsmModule {
     pub fn load_imm(&mut self, reg: AsmOperand, imm: &Imm) -> Vec<AsmValueId> {
         let mut ret = Vec::new();
         if let Imm::Float(fimm) = imm {
-            let tmp = IntReg::new(RegType::Ip);
+            let tmp = Reg::new(RegType::Ip);
             ret.extend(self.load_imm(tmp.clone().into(), &Imm::Int(fimm.cast_to_raw_int().into())));
             let inst: AsmInst = VMovInst::new(VMovType::A2S, reg, tmp.into()).into();
             let inst_id = self.values.alloc(AsmValue::Inst(inst));
@@ -196,7 +196,7 @@ impl AsmModule {
         if let AsmOperand::Imm(imm) = op1.clone() {
             assert!(!ip_used);
             ip_used = true;
-            let tmp = AsmOperand::IntReg(IntReg::new(RegType::Ip));
+            let tmp = AsmOperand::IntReg(Reg::new(RegType::Ip));
             ret.extend(self.load_imm(tmp.clone(), &imm));
             op1 = tmp;
         }
@@ -207,7 +207,7 @@ impl AsmModule {
                 {
                     assert!(!ip_used);
                     // ip_used = true;
-                    let tmp = AsmOperand::IntReg(IntReg::new(RegType::Ip));
+                    let tmp = AsmOperand::IntReg(Reg::new(RegType::Ip));
                     ret.extend(self.load_imm(tmp.clone(), &imm));
                     op2 = tmp;
                 }
@@ -218,6 +218,274 @@ impl AsmModule {
         self.set_inst(bin_id, bin_inst.into());
         ret.push(bin_id);
         ret
+    }
+
+    // 检查第二个参数StackOperand是否满足要求，不满足则展开为多个指令
+    // 给寄存器分配使用的公开版本
+    pub fn expand_stack_operand_load_store_ip(&mut self, inst_id: AsmValueId) -> Vec<AsmValueId> {
+        let inst = self.get_inst_mut(inst_id).clone();
+        let mut ret = Vec::<AsmValueId>::new();
+        let mut newuse = Vec::new();
+        assert!(matches!(
+            inst,
+            AsmInst::LDR(_) | AsmInst::STR(_) | AsmInst::VSTR(_) | AsmInst::VLDR(_)
+        ));
+        match inst {
+            AsmInst::STR(_) | AsmInst::VSTR(_) => {
+                newuse.push(inst.get_uses()[0].clone());
+                self.expand_stack_operand_ip(
+                    inst_id,
+                    &inst.get_uses()[1],
+                    &inst.get_uses()[0],
+                    &mut newuse,
+                    &mut ret,
+                );
+            }
+            AsmInst::LDR(_) | AsmInst::VLDR(_) => {
+                self.expand_stack_operand_ip(
+                    inst_id,
+                    &inst.get_uses()[0],
+                    &inst.get_defs()[0],
+                    &mut newuse,
+                    &mut ret,
+                );
+            }
+            _ => (),
+        }
+        // in case of using a old value
+        let mut inst = self.get_inst_mut(inst_id).clone();
+        inst.set_uses(newuse);
+        self.set_inst(inst_id, inst);
+        ret.push(inst_id);
+        ret
+    }
+
+    pub fn expand_stack_operand_load_store_tmp(
+        &mut self,
+        inst: AsmInst,
+        tmp: AsmOperand,
+    ) -> VecDeque<AsmInst> {
+        let mut ret = VecDeque::new();
+        let mut new_use = Vec::new();
+        assert!(matches!(
+            inst,
+            AsmInst::LDR(_) | AsmInst::STR(_) | AsmInst::VSTR(_) | AsmInst::VLDR(_)
+        ));
+        match inst {
+            AsmInst::STR(_) | AsmInst::VSTR(_) => {
+                new_use.push(inst.get_uses()[0].clone());
+                // For StoreInst and VSTRInst, value register can't be occupied, a temporary register must be used if situation occurs
+                self.expand_stack_operand_tmp(
+                    &mut inst,
+                    &inst.get_uses()[1], // possible StackOperand
+                    &inst.get_uses()[0],
+                    &tmp,
+                    &mut new_use,
+                    &mut ret,
+                    &inst.parent,
+                );
+            }
+            AsmInst::LDR(_) | AsmInst::VLDR(_) => {
+                // For LoadInst and VLDRInst, no additional register is needed, as long as there is a target register
+                self.expand_stack_operand_tmp(
+                    &mut inst,
+                    &inst.uses[0],
+                    &inst.defs[0],
+                    &tmp,
+                    &mut new_use,
+                    &mut ret,
+                    &inst.parent,
+                );
+            }
+            _ => (),
+        }
+        inst.uses = new_use;
+        ret.push_back(inst);
+        ret
+    }
+
+    pub fn expand_stack_operand_ip(
+        &mut self,
+        inst_id: AsmValueId,
+        op: &AsmOperand,
+        target: &AsmOperand,
+        new_ops: &mut Vec<AsmOperand>,
+        insts: &mut Vec<AsmValueId>,
+    ) {
+        let inst = self.get_inst(inst_id).clone();
+        match op {
+            AsmOperand::StackOperand(so) => {
+                if inst.is_imm_fit(so) {
+                    new_ops.push(AsmOperand::StackOperand(so.clone()));
+                    return;
+                }
+                assert!(matches!(
+                    target,
+                    AsmOperand::IntReg(_) | AsmOperand::VfpReg(_)
+                ));
+                let tmp = AsmOperand::IntReg(Reg::new(RegType::Ip));
+                let tmp2 = AsmOperand::IntReg(Reg::new(RegType::Ip));
+                match so.ty {
+                    StackOperandType::SelfArg => {
+                        insts.extend(
+                            self.load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                        );
+                        let inst = mc_inst::BinOpInst::new(
+                            mc_inst::BinaryOp::Add,
+                            tmp2.clone(),
+                            AsmOperand::IntReg(Reg::new(RegType::Fp)),
+                            tmp,
+                        );
+                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
+                        let id = self.alloc_value(inst);
+
+                        insts.push(id);
+                    }
+                    StackOperandType::Local | StackOperandType::Spill => {
+                        insts.extend(
+                            self.load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                        );
+                        let inst = mc_inst::BinOpInst::new(
+                            mc_inst::BinaryOp::Sub,
+                            tmp2.clone(),
+                            AsmOperand::IntReg(Reg::new(RegType::Fp)),
+                            tmp,
+                        );
+                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
+                        let id = self.alloc_value(inst);
+
+                        insts.push(id);
+                    }
+                    StackOperandType::CallParam => {
+                        insts.extend(
+                            self.load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                        );
+                        let inst = mc_inst::BinOpInst::new(
+                            mc_inst::BinaryOp::Add,
+                            tmp2.clone(),
+                            AsmOperand::IntReg(Reg::new(RegType::Sp)),
+                            tmp,
+                        );
+                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
+                        let id = self.alloc_value(inst);
+
+                        insts.push(id);
+                    }
+                }
+                new_ops.push(tmp2);
+            }
+            _ => {
+                new_ops.push((*op).clone());
+            }
+        }
+    }
+
+    // 指定临时寄存器
+    // public static void expandStackOperandTmp(StackOpInst inst, AsmOperand op, AsmOperand target, AsmOperand tmp, List<AsmOperand> newOps, List<AsmInst> insts,
+    //                                     AsmBlock p) {
+    //     if (op instanceof StackOperand) {
+    //         var so = (StackOperand) op;
+    //         // – 4095 to +4095 then OK。但由于后面要加减一些？，所以范围放窄一些？TODO
+    //         if (inst.isImmFit(so)) {
+    //             newOps.add(so);
+    //             return;
+    //         }
+    //         assert target instanceof Reg || target instanceof VfpReg;
+    //         // AsmOperand tmp= new Reg(Reg.Type.ip);
+    //         assert tmp != null;
+    //         var tmp2 = tmp;
+    //         if (so.type == StackOperand.Type.SELF_ARG) {
+    //             insts.addAll(MovInst.loadImm(p, tmp, new IntImm(Math.toIntExact(so.offset))));
+    //             insts.add(new BinOpInst(p, BinaryOp.ADD, tmp2, new Reg(Reg.Type.fp), tmp));
+    //         } else if (so.type == StackOperand.Type.LOCAL || so.type == StackOperand.Type.SPILL) {
+    //             insts.addAll(MovInst.loadImm(p, tmp, new IntImm(Math.toIntExact(so.offset))));
+    //             insts.add(new BinOpInst(p, BinaryOp.SUB, tmp2, new Reg(Reg.Type.fp), tmp));
+    //         } else if (so.type == StackOperand.Type.CALL_PARAM) {
+    //             insts.addAll(MovInst.loadImm(p, tmp, new IntImm(Math.toIntExact(so.offset))));
+    //             insts.add(new BinOpInst(p, BinaryOp.ADD, tmp2, new Reg(Reg.Type.sp), tmp));
+    //         } else {throw new UnsupportedOperationException();}
+
+    //         newOps.add(tmp2);
+    //     } else {
+    //         // 不变
+    //         newOps.add(op);
+    //     }
+    // }
+
+    pub fn expand_stack_operand_tmp(
+        &mut self,
+        inst_id: AsmValueId,
+        op: &AsmOperand,
+        target: &AsmOperand,
+        tmp: &AsmOperand,
+        new_ops: &mut Vec<AsmOperand>,
+        insts: &mut Vec<AsmValueId>,
+    ) {
+        let inst = self.get_inst(inst_id).clone();
+        match op {
+            AsmOperand::StackOperand(so) => {
+                if inst.is_imm_fit(so) {
+                    new_ops.push(AsmOperand::StackOperand(so.clone()));
+                    return;
+                }
+                assert!(matches!(
+                    target,
+                    AsmOperand::IntReg(_) | AsmOperand::VfpReg(_)
+                ));
+                let tmp2 = tmp.clone();
+                match so.ty {
+                    StackOperandType::SelfArg => {
+                        insts.extend(
+                            self.load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                        );
+                        let inst = mc_inst::BinOpInst::new(
+                            mc_inst::BinaryOp::Add,
+                            tmp2.clone(),
+                            AsmOperand::IntReg(Reg::new(RegType::Fp)),
+                            tmp.clone(),
+                        );
+                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
+                        let id = self.alloc_value(inst);
+
+                        insts.push(id);
+                    }
+                    StackOperandType::Local | StackOperandType::Spill => {
+                        insts.extend(
+                            self.load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                        );
+                        let inst = mc_inst::BinOpInst::new(
+                            mc_inst::BinaryOp::Sub,
+                            tmp2.clone(),
+                            AsmOperand::IntReg(Reg::new(RegType::Fp)),
+                            tmp.clone(),
+                        );
+                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
+                        let id = self.alloc_value(inst);
+
+                        insts.push(id);
+                    }
+                    StackOperandType::CallParam => {
+                        insts.extend(
+                            self.load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
+                        );
+                        let inst = mc_inst::BinOpInst::new(
+                            mc_inst::BinaryOp::Add,
+                            tmp2.clone(),
+                            AsmOperand::IntReg(Reg::new(RegType::Sp)),
+                            tmp.clone(),
+                        );
+                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
+                        let id = self.alloc_value(inst);
+
+                        insts.push(id);
+                    }
+                }
+                new_ops.push(tmp2);
+            }
+            _ => {
+                new_ops.push(op.clone());
+            }
+        }
     }
 }
 
@@ -334,7 +602,7 @@ pub enum AsmOperand {
     Imm(Imm),
     StackOperand(StackOperand),
     VirtReg(VirtReg),
-    IntReg(IntReg),
+    IntReg(Reg),
     VfpDoubleReg(VfpDoubleReg),
     VfpReg(VfpReg),
 }
@@ -368,7 +636,7 @@ impl AsmOperand {
         }
     }
 
-    pub fn as_int_reg(&self) -> Option<&IntReg> {
+    pub fn as_int_reg(&self) -> Option<&Reg> {
         match self {
             AsmOperand::IntReg(reg) => Some(reg),
             _ => None,
@@ -417,8 +685,8 @@ impl From<VirtReg> for AsmOperand {
     }
 }
 
-impl From<IntReg> for AsmOperand {
-    fn from(reg: IntReg) -> Self {
+impl From<Reg> for AsmOperand {
+    fn from(reg: Reg) -> Self {
         AsmOperand::IntReg(reg)
     }
 }
@@ -515,6 +783,12 @@ pub struct StackOperand {
     pub offset: i64,
 }
 
+impl StackOperand {
+    pub fn new(ty: StackOperandType, offset: i64) -> Self {
+        Self { ty, offset }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum StackOperandType {
     Local,
@@ -545,12 +819,17 @@ impl From<i64> for VirtReg {
     }
 }
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub struct IntReg {
+pub struct Reg {
     pub ty: RegType,
     pub is_float: bool,
 }
 
-impl IntReg {
+impl Reg {
+    pub fn is_callee_saved(index: i64) -> bool {
+        RegType::is_callee_saved(index)
+    }
+}
+impl Reg {
     pub fn new(ty: RegType) -> Self {
         Self {
             ty,
@@ -559,7 +838,7 @@ impl IntReg {
     }
 }
 
-impl From<i64> for IntReg {
+impl From<i64> for Reg {
     fn from(val: i64) -> Self {
         assert!((0..16).contains(&val));
         Self {
@@ -590,8 +869,7 @@ pub enum RegType {
 }
 
 impl RegType {
-    pub fn is_callee_saved(&self) -> bool {
-        let idx: i64 = (*self).into();
+    pub fn is_callee_saved(idx: i64) -> bool {
         (4..=10).contains(&idx)
     }
 }
@@ -660,8 +938,8 @@ pub struct VfpReg {
 }
 
 impl VfpReg {
-    pub fn is_callee_saved(&self) -> bool {
-        self.index >= 16
+    pub fn is_callee_saved(index: i64) -> bool {
+        index >= 16
     }
 }
 
@@ -904,11 +1182,13 @@ impl CallConv {
 
 /// ARM ABI calling convention
 /// https://learn.microsoft.com/zh-cn/cpp/build/overview-of-arm-abi-conventions?view=msvc-170
-use std::{cmp, default, hash};
+use std::{cmp, collections::VecDeque, default, hash};
 
 use crate::{
     ast::Type,
-    mc_inst::{self, AsmInst, AsmInstTrait, MovInst, MovType, VMovInst, VMovType},
+    mc_inst::{
+        self, AsmInst, AsmInstTrait, MovInst, MovType, StackOpInstTrait, VMovInst, VMovType,
+    },
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -944,7 +1224,7 @@ impl BaseCallConv {
     pub fn new() -> Self {
         Self {
             call_params: Vec::new(),
-            ret_reg: AsmOperand::IntReg(IntReg {
+            ret_reg: AsmOperand::IntReg(Reg {
                 ty: RegType::R0,
                 is_float: false,
             }),
@@ -955,7 +1235,7 @@ impl BaseCallConv {
 
     pub fn resolve(mut self, params: &[ParamInfo], ret_ty: AsmTypeTag) -> Self {
         if ret_ty != AsmTypeTag::VOID {
-            self.ret_reg = AsmOperand::IntReg(IntReg {
+            self.ret_reg = AsmOperand::IntReg(Reg {
                 ty: RegType::R0,
                 is_float: ret_ty.is_float(),
             });
@@ -979,7 +1259,7 @@ impl BaseCallConv {
         };
         if self.ncrn + (size / 4) <= 4 {
             let ty = RegType::from(self.ncrn);
-            ret = AsmOperand::IntReg(IntReg {
+            ret = AsmOperand::IntReg(Reg {
                 ty,
                 is_float: false,
             });
@@ -1025,7 +1305,7 @@ impl VfpCallConv {
         Self {
             call_params: Vec::new(),
             self_args: Vec::new(),
-            ret_reg: AsmOperand::IntReg(IntReg {
+            ret_reg: AsmOperand::IntReg(Reg {
                 ty: RegType::R0,
                 is_float: false,
             }),
@@ -1039,7 +1319,7 @@ impl VfpCallConv {
         if ret_ty == AsmTypeTag::FLOAT {
             self.ret_reg = AsmOperand::VfpReg(VfpReg::from(0));
         } else if ret_ty == AsmTypeTag::INT32 {
-            self.ret_reg = AsmOperand::IntReg(IntReg::from(0));
+            self.ret_reg = AsmOperand::IntReg(Reg::from(0));
         }
 
         for param in params {
@@ -1068,7 +1348,7 @@ impl VfpCallConv {
                 }
             } else if (self.ncrn + (size / 4)) <= 4 {
                 // 寄存器能分配下
-                let result = AsmOperand::IntReg(IntReg::from(self.ncrn));
+                let result = AsmOperand::IntReg(Reg::from(self.ncrn));
                 self.call_params.push(result.clone());
                 self.self_args.push(result);
                 self.ncrn += size / 4;

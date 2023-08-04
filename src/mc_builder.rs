@@ -529,7 +529,7 @@ impl McBuilder<'_> {
                 let bin = BinOpInst::new(
                     BinaryOp::Sub,
                     self.convert_value(inst_id, asm_func_id, asm_bb_id),
-                    AsmOperand::IntReg(IntReg {
+                    AsmOperand::IntReg(Reg {
                         ty: RegType::Fp,
                         is_float: false,
                     }),
@@ -854,7 +854,7 @@ impl McBuilder<'_> {
                             reg.clone().into(),
                             VfpDoubleReg::default().into(),
                         );
-                        let next = IntReg {
+                        let next = Reg {
                             ty: RegType::from(i64::from(reg.ty) + 1),
                             is_float: false,
                         };
@@ -1224,7 +1224,7 @@ impl McBuilder<'_> {
                     let binop = mc_inst::BinOpInst::new(
                         mc_inst::BinaryOp::Add,
                         tmp2.clone(),
-                        IntReg::new(RegType::Fp).into(),
+                        Reg::new(RegType::Fp).into(),
                         tmp,
                     );
                     let new_inst = AsmValue::Inst(mc_inst::AsmInst::BinOp(binop));
@@ -1238,7 +1238,7 @@ impl McBuilder<'_> {
                     let binop = mc_inst::BinOpInst::new(
                         mc_inst::BinaryOp::Sub,
                         tmp2.clone(),
-                        IntReg::new(RegType::Fp).into(),
+                        Reg::new(RegType::Fp).into(),
                         tmp,
                     );
                     let new_inst = AsmValue::Inst(mc_inst::AsmInst::BinOp(binop));
@@ -1252,7 +1252,7 @@ impl McBuilder<'_> {
                     let binop = mc_inst::BinOpInst::new(
                         mc_inst::BinaryOp::Add,
                         tmp2.clone(),
-                        IntReg::new(RegType::Sp).into(),
+                        Reg::new(RegType::Sp).into(),
                         tmp,
                     );
                     let new_inst = AsmValue::Inst(mc_inst::AsmInst::BinOp(binop));
@@ -1322,124 +1322,7 @@ impl McBuilder<'_> {
         ret
     }
 
-    // 检查第二个参数StackOperand是否满足要求，不满足则展开为多个指令
-    // 给寄存器分配使用的公开版本
-    pub fn expand_stack_operand_load_store_ip(&mut self, inst_id: AsmValueId) -> Vec<AsmValueId> {
-        let inst = self.module.get_inst_mut(inst_id).clone();
-        let mut ret = Vec::<AsmValueId>::new();
-        let mut newuse = Vec::new();
-        assert!(matches!(
-            inst,
-            AsmInst::LDR(_) | AsmInst::STR(_) | AsmInst::VSTR(_) | AsmInst::VLDR(_)
-        ));
-        match inst {
-            AsmInst::STR(_) | AsmInst::VSTR(_) => {
-                newuse.push(inst.get_uses()[0].clone());
-                self.expand_stack_operand_ip(
-                    inst_id,
-                    &inst.get_uses()[1],
-                    &inst.get_uses()[0],
-                    &mut newuse,
-                    &mut ret,
-                );
-            }
-            AsmInst::LDR(_) | AsmInst::VLDR(_) => {
-                self.expand_stack_operand_ip(
-                    inst_id,
-                    &inst.get_uses()[0],
-                    &inst.get_defs()[0],
-                    &mut newuse,
-                    &mut ret,
-                );
-            }
-            _ => (),
-        }
-        // in case of using a old value
-        let mut inst = self.module.get_inst_mut(inst_id).clone();
-        inst.set_uses(newuse);
-        self.module.set_inst(inst_id, inst);
-        ret.push(inst_id);
-        ret
-    }
 
-    pub fn expand_stack_operand_ip(
-        &mut self,
-        inst_id: AsmValueId,
-        op: &AsmOperand,
-        target: &AsmOperand,
-        new_ops: &mut Vec<AsmOperand>,
-        insts: &mut Vec<AsmValueId>,
-    ) {
-        let inst = self.module.get_inst(inst_id).clone();
-        match op {
-            AsmOperand::StackOperand(so) => {
-                if inst.is_imm_fit(so) {
-                    new_ops.push(AsmOperand::StackOperand(so.clone()));
-                    return;
-                }
-                assert!(matches!(
-                    target,
-                    AsmOperand::IntReg(_) | AsmOperand::VfpReg(_)
-                ));
-                let tmp = AsmOperand::IntReg(IntReg::new(RegType::Ip));
-                let tmp2 = AsmOperand::IntReg(IntReg::new(RegType::Ip));
-                match so.ty {
-                    StackOperandType::SelfArg => {
-                        insts.extend(
-                            self.module
-                                .load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
-                        );
-                        let inst = mc_inst::BinOpInst::new(
-                            mc_inst::BinaryOp::Add,
-                            tmp2.clone(),
-                            AsmOperand::IntReg(IntReg::new(RegType::Fp)),
-                            tmp,
-                        );
-                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
-                        let id = self.module.alloc_value(inst);
-
-                        insts.push(id);
-                    }
-                    StackOperandType::Local | StackOperandType::Spill => {
-                        insts.extend(
-                            self.module
-                                .load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
-                        );
-                        let inst = mc_inst::BinOpInst::new(
-                            mc_inst::BinaryOp::Sub,
-                            tmp2.clone(),
-                            AsmOperand::IntReg(IntReg::new(RegType::Fp)),
-                            tmp,
-                        );
-                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
-                        let id = self.module.alloc_value(inst);
-
-                        insts.push(id);
-                    }
-                    StackOperandType::CallParam => {
-                        insts.extend(
-                            self.module
-                                .load_imm(tmp.clone(), &Imm::Int(IntImm::from(so.offset as i32))),
-                        );
-                        let inst = mc_inst::BinOpInst::new(
-                            mc_inst::BinaryOp::Add,
-                            tmp2.clone(),
-                            AsmOperand::IntReg(IntReg::new(RegType::Sp)),
-                            tmp,
-                        );
-                        let inst = AsmValue::Inst(AsmInst::BinOp(inst));
-                        let id = self.module.alloc_value(inst);
-
-                        insts.push(id);
-                    }
-                }
-                new_ops.push(tmp2);
-            }
-            _ => {
-                new_ops.push((*op).clone());
-            }
-        }
-    }
     // 使用临时寄存器的场景
     fn get_vreg(&mut self, is_float: bool) -> VirtReg {
         let ret = VirtReg::new(self.vreg_idx, is_float);
