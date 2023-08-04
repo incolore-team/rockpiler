@@ -322,7 +322,12 @@ impl Mem2Reg<'_> {
                 continue;
             }
 
-            let users_of_alloca = self.module.value_user[&inst_id].clone();
+            let users_of_alloca = self
+                .module
+                .value_user
+                .get(&inst_id)
+                .cloned()
+                .unwrap_or_default();
 
             let mut inst_is_promotable = true;
 
