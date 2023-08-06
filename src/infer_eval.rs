@@ -1,3 +1,5 @@
+use log::debug;
+
 use crate::ast::*;
 use crate::scope::SymbolTable;
 use crate::symbol::Symbol;
@@ -57,6 +59,7 @@ impl Literal {
             Literal::Float(_) => Type::Builtin(BuiltinType::Double),
             Literal::Bool(_) => Type::Builtin(BuiltinType::Bool),
             Literal::String(_) => Type::Pointer(PointerType::new(Type::Builtin(BuiltinType::Char))),
+            Literal::ArrayInitVal(_) => todo!(),
         }
     }
 }
@@ -259,8 +262,22 @@ impl PostfixExpr {
             PostfixOp::DotAccess(_dot) => {
                 unreachable!()
             }
-            PostfixOp::IndexAccess(IndexAccess { index: _ }) => {
-                unreachable!()
+            PostfixOp::IndexAccess(IndexAccess { index }) => {
+                let index_val = index.eval_literal(syms)?;
+                // debug!("lhs_val: {:?}, index_val: {:?}", lhs_val, index_val);
+                if let Literal::ArrayInitVal(array_iv) = lhs_val {
+                    let index: usize = index_val.into();
+                    if let Some(iv) = array_iv.0.get(index) {
+                        match iv {
+                            InitVal::Expr(expr) => expr.eval_literal(syms),
+                            InitVal::Array(array_iv) => array_iv.eval_literal(syms),
+                        }
+                    } else {
+                        Some(Literal::Int(0))
+                    }
+                } else {
+                    unreachable!()
+                }
             }
         }
     }
@@ -318,6 +335,7 @@ impl InferEvaluator for IdentExpr {
     fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal> {
         if let Some(Symbol::Var(var_sym)) = syms.resolve_symbol(&self.id) {
             if let Some(init) = &var_sym.var.init {
+                // debug!("init: {:?}", init);
                 init.eval_literal(syms)
             } else {
                 None
@@ -339,8 +357,18 @@ impl InferEvaluator for InitVal {
     fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal> {
         match self {
             InitVal::Expr(expr) => expr.eval_literal(syms),
-            InitVal::Array(_array) => None,
+            InitVal::Array(array) => array.eval_literal(syms),
         }
+    }
+}
+
+impl InferEvaluator for ArrayInitVal {
+    fn infer_type(&self, syms: &SymbolTable) -> Option<Type> {
+        todo!()
+    }
+
+    fn eval_literal(&self, syms: &SymbolTable) -> Option<Literal> {
+        Some(Literal::ArrayInitVal(self.clone()))
     }
 }
 
@@ -370,6 +398,7 @@ impl InferEvaluator for Literal {
             Literal::String(_) => Type::Pointer(PointerType {
                 type_: Box::new(Type::Builtin(BuiltinType::Char)),
             }),
+            Literal::ArrayInitVal(_) => todo!(),
         })
     }
 

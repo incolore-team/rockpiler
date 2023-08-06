@@ -113,6 +113,7 @@ pub struct VarDecl {
     pub name: String,
     pub type_: Type,
     pub is_const: bool,
+    // pub is_global: bool,
     pub init: Option<InitVal>,
 
     pub sema_ref: Option<SemaRef>,
@@ -296,6 +297,7 @@ pub enum Literal {
     Float(f64),
     Bool(bool),
     String(String),
+    ArrayInitVal(ArrayInitVal),
 }
 #[derive(Debug, PartialEq, Clone)]
 struct Double(f64);

@@ -48,7 +48,6 @@ pub struct Module {
 
 impl Module {
     pub fn new(syms: SymbolTable) -> Self {
-        
         // module.add_builtin_types();
         Module {
             values: Arena::new(),
@@ -199,7 +198,7 @@ impl Module {
 
     pub fn spawn_zero_value(&mut self, ty: Type) -> ValueId {
         let val = ConstValue::zero_of(ty);
-        
+
         self.alloc_value(val.into())
     }
 
@@ -531,6 +530,8 @@ impl Module {
         pointer: ValueId,
         indices: Vec<ValueId>,
     ) -> ValueId {
+        // let base_size = base.size();
+        // debug!("{:?}", base);
         let gep = GetElementPtrInst {
             ty,
             base,
@@ -565,7 +566,7 @@ impl Module {
             ty,
             incomings: Vec::new(),
         };
-        
+
         self.alloc_value(phi.into())
     }
 
@@ -647,7 +648,7 @@ impl Module {
 
     pub fn alloc_basic_block(&mut self) -> ValueId {
         let bb = BasicBlockValue::default();
-        
+
         self.alloc_value(Value::BasicBlock(bb))
     }
     pub fn spawn_basic_block(&mut self) -> ValueId {

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use log::trace;
+use log::{debug, trace};
 
 use crate::{ast::*, infer_eval::InferEvaluator, ir::*, scope::*};
 
@@ -104,6 +104,7 @@ impl Builder {
             .init
             .as_ref()
             .map(|init_val| self.build_global_init_val(init_val, &ty));
+        // debug!("name: {:?}, initializer: {:?}", name, initializer);
         let initializer_id = initializer.map(|cv| self.module.alloc_value(cv.into()));
 
         let global_var = GlobalVariableValue {
@@ -115,6 +116,10 @@ impl Builder {
 
         let global_var_id = self.module.alloc_value(Value::GlobalVariable(global_var));
         self.module.global_variables.insert(name, global_var_id);
+        // let symbol_id = var_decl.sema_ref.as_ref().unwrap().symbol_id;
+        // debug!("symbol_id: {:?}", symbol_id);
+        // debug!("global_variables: {:?}", self.module.global_variables);
+        // debug!("syms: {:?}", self.module.syms);
         self.module
             .sym2def
             .insert(var_decl.sema_ref.as_ref().unwrap().symbol_id, global_var_id);
@@ -234,11 +239,31 @@ impl Builder {
             ty: Type::Array(ArrayType::Constant(type_.clone())),
             values,
         })
+        // debug!("ret: {:?}", ret);
+    }
+
+    pub fn rebuild_init_val_from_const_value(&mut self, const_value: &ConstValue) -> InitVal {
+        match const_value {
+            ConstValue::Array(const_array) => InitVal::Array(ArrayInitVal(
+                const_array
+                    .values
+                    .iter()
+                    .map(|cv| self.rebuild_init_val_from_const_value(cv))
+                    .collect(),
+            )),
+            ConstValue::Int(_int) => InitVal::Expr(Box::new(Expr::Primary(PrimaryExpr::Literal(
+                Literal::Int(_int.value),
+            )))),
+            _ => {
+                todo!()
+            }
+        }
     }
 
     pub fn build_global_init_val(&mut self, init_val: &InitVal, type_: &Type) -> ConstValue {
         match init_val {
             InitVal::Expr(expr) => {
+                // debug!("expr: {:?}", expr);
                 let literal = expr.eval_literal(&self.module.syms).unwrap();
                 match literal {
                     Literal::Int(val) => ConstValue::Int(ConstInt {
@@ -251,6 +276,7 @@ impl Builder {
             InitVal::Array(array_init_val) => {
                 if let Type::Array(ArrayType::Constant(const_at)) = type_ {
                     let mut deque = VecDeque::from(array_init_val.0.clone());
+                    // debug!("deque: {:?}", deque);
                     self.build_global_array_init_val(&mut deque, const_at)
                     // let elem_type = const_at.element_type.as_ref();
                     // let mut values = vec![];
@@ -757,8 +783,7 @@ impl Builder {
                 PrimaryExpr::Group(expr) => self.build_expr(expr, false),
                 PrimaryExpr::Call(call_expr) => {
                     let func_id = *self.module.functions.get(&call_expr.id).unwrap();
-                    let args = call_expr
-                        .args.to_vec(); // 将结果收集到一个临时的 Vec 中
+                    let args = call_expr.args.to_vec(); // 将结果收集到一个临时的 Vec 中
 
                     let args = args.into_iter().map(|arg| self.build_expr(&arg, false)); // 使用临时 Vec 构建表达式，避免多次借用 self
                     let args = args.collect::<Vec<_>>(); // 将结果收集到一个临时的 Vec 中
@@ -821,6 +846,7 @@ impl Builder {
                 todo!("build string literal")
             }
             Literal::Char(_) => todo!(),
+            Literal::ArrayInitVal(_) => todo!(),
         }
     }
 }

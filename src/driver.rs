@@ -1,4 +1,4 @@
-use log::trace;
+use log::{debug, trace};
 
 use crate::{
     arm_printer,
@@ -30,14 +30,17 @@ pub fn drive(args: Args) {
         trace!("syms: \n{}", syms.print_table());
         trace!("ast: {:#?}", ast);
         trace!("================== SEMA+AST => Pre-SSA IR ==================");
+        debug!(";{}", args.output.display());
         let mut module = ir_builder::build(&mut ast, syms);
         inst_namer::run(&mut module);
         trace!("================== Pre-SSA Module as LLVM IR ==================");
+        debug!(";{}", args.output.display());
         ir_printer::print(&mut module);
         mem2reg::run(&mut module);
         inst_namer::run(&mut module);
 
         trace!("================== SSA Module as LLVM IR ==================");
+        debug!(";{}", args.output.display());
         ir_printer::print(&mut module);
         trace!("================== Arm Assembly Module ==================");
         let mut arm_module = mc_builder::build(&mut module);

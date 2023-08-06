@@ -1,5 +1,7 @@
+use std::collections::VecDeque;
+
 use crate::{ast::*, infer_eval::InferEvaluator, scope::*, symbol::*};
-use log::trace;
+use log::{debug, trace};
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SemaRef {
     pub symbol_id: SymbolId,
@@ -75,17 +77,59 @@ fn eval_array_type(at: &mut ArrayType, symbol_table: &mut SymbolTable) {
     }
 }
 
+fn flatten_init_val(deque: &mut VecDeque<InitVal>, type_: &ConstantArrayType) -> Option<InitVal> {
+    let dim = type_.size;
+    let elem_type = type_.element_type.as_ref();
+    debug!("type_: {:?}, elem_type: {:?}", type_, elem_type);
+    let mut values = vec![];
+    match elem_type {
+        Type::Array(at) => {
+            for _ in 0..dim {
+                if let ArrayType::Constant(const_at) = at {
+                    let iv_ = deque.front().cloned();
+                    if let Some(iv) = iv_ {
+                        values.push(match iv {
+                            InitVal::Array(array_iv) => {
+                                deque.pop_front();
+                                let mut sub_deque = VecDeque::from(array_iv.0.clone());
+                                flatten_init_val(&mut sub_deque, const_at)?
+                            }
+                            InitVal::Expr(_expr) => flatten_init_val(deque, const_at)?,
+                        })
+                    }
+                }
+            }
+        }
+        _ => {
+            for _ in 0..dim {
+                let iv_ = deque.pop_front();
+                if let Some(iv) = iv_ {
+                    values.push(iv);
+                }
+            }
+        }
+    }
+    Some(InitVal::Array(ArrayInitVal(values)))
+}
+
 impl ToSemaTrait for VarDecl {
     fn to_sema(&mut self, symbol_table: &mut SymbolTable) {
-        if let Some(iv) = &mut self.init {
-            iv.to_sema(symbol_table);
-        }
         match &mut self.type_ {
             Type::Array(at) => {
                 eval_array_type(at, symbol_table);
             }
             _ => (),
         };
+        if let Some(iv) = &mut self.init {
+            iv.to_sema(symbol_table);
+            if let InitVal::Array(array_init_val) = iv {
+                if let Type::Array(ArrayType::Constant(const_at)) = &self.type_ {
+                    let mut deque = VecDeque::from(array_init_val.0.clone());
+                    let const_value = flatten_init_val(&mut deque, const_at);
+                    *iv = const_value.unwrap();
+                }
+            }
+        }
         let symbol = Symbol::Var(VarSymbol::new(self.clone()));
         let symbol_id = symbol_table.insert_symbol(self.name.clone(), symbol);
         self.sema_ref = Some(SemaRef::new(symbol_id, symbol_table.scope_id()));

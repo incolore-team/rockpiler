@@ -1,3 +1,5 @@
+use log::debug;
+
 use crate::{ast::*, ir::*};
 
 pub fn print(module: &mut Module) {
@@ -329,6 +331,7 @@ impl<'a> Printer<'a> {
                     let mut ret = "[".to_string();
                     let mut is_first = true;
                     let dim = const_at.size;
+                    let mut ty = None;
                     for i in 0..dim {
                         if !is_first {
                             ret += ", ";
@@ -336,6 +339,7 @@ impl<'a> Printer<'a> {
                         let value = ca.values.get(i);
                         match value {
                             Some(cv) => {
+                                ty = Some(cv.ty());
                                 ret += &format!(
                                     "{} {}",
                                     self.format_type(&cv.ty()),
@@ -343,7 +347,7 @@ impl<'a> Printer<'a> {
                                 );
                             }
                             None => {
-                                ret += &format!("{} 0", self.format_type(&val.ty()));
+                                ret += &format!("{} 0", self.format_type(&ty.clone().unwrap()));
                             }
                         }
                         is_first = false;
